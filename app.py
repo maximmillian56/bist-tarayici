@@ -1,105 +1,233 @@
 """
-BIST Hisse Senedi Tarayıcısı — Web Uygulaması Backend
-Flask
+BIST Hisse Senedi Tarayıcısı v2.0
+TradingView Screener (temel + teknik + destek/direnç)
+yfinance (mevsimsel analiz, arka plan)
 """
-import os, time, threading
+import os, threading
 from datetime import datetime
 from flask import Flask, jsonify, send_file
-from tradingview_screener import Query
 
-# ==============================================================================
-#  ⚙️  CONFIG
-# ==============================================================================
-
-PORT = int(os.environ.get("PORT", 5000))
+PORT     = int(os.environ.get("PORT", 5000))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# ==============================================================================
-#  FLASK KURULUMU
-# ==============================================================================
-
 app      = Flask(__name__)
 
-# Veri cache'i
-_cache = {
-    "stocks"    : None,
-    "updated_at": None,
-    "loading"   : False,
-    "error"     : None,
-}
-# İlerleme takibi (yükleme sırasında kaç hisse tamamlandı)
-_progress = {"done": 0, "total": 0}
-_lock     = threading.Lock()
+# ==============================================================================
+#  ÖNBELLEKLER
+# ==============================================================================
+
+_cache = {"stocks": None, "updated_at": None, "loading": False, "error": None}
+_seasonal_cache = {"data": None, "updated_at": None, "loading": False}
+_progress = {"done": 0, "total": 613}
+_lock = threading.Lock()
 
 # ==============================================================================
-#  VERİ ÇEKME FONKSİYONU
+#  YARDIMCI FONKSİYONLAR
+# ==============================================================================
+
+def _sf(val):
+    """safe_float — None, NaN veya boş değerleri None döndürür."""
+    if val is None:
+        return None
+    try:
+        s = str(val).strip().lower()
+        if s in ("nan", "none", "null", "inf", "-inf", ""):
+            return None
+        f = float(val)
+        return None if f != f else f   # NaN guard
+    except Exception:
+        return None
+
+def _sr(val, n=2):
+    """safe_round"""
+    f = _sf(val)
+    return round(f, n) if f is not None else None
+
+def _signal(recommend):
+    """Recommend.All → Türkçe etiket + renk sınıfı"""
+    if recommend is None:
+        return {"label": "—", "cls": "neutral", "icon": "➡️"}
+    r = float(recommend)
+    if r >= 0.5:
+        return {"label": "Güçlü Al",  "cls": "strong-buy",  "icon": "🚀"}
+    elif r >= 0.1:
+        return {"label": "Al",        "cls": "buy",         "icon": "📈"}
+    elif r > -0.1:
+        return {"label": "Nötr",      "cls": "neutral",     "icon": "➡️"}
+    elif r > -0.5:
+        return {"label": "Sat",       "cls": "sell",        "icon": "📉"}
+    else:
+        return {"label": "Güçlü Sat", "cls": "strong-sell", "icon": "🔻"}
+
+def _rsi_signal(rsi):
+    """RSI → Türkçe etiket"""
+    if rsi is None:
+        return {"label": "—", "cls": "neutral"}
+    r = float(rsi)
+    if r < 30:
+        return {"label": f"Aşırı Satım ({r:.0f})", "cls": "oversold"}
+    elif r > 70:
+        return {"label": f"Aşırı Alım ({r:.0f})",  "cls": "overbought"}
+    elif r <= 45:
+        return {"label": f"Düşük ({r:.0f})",        "cls": "low-rsi"}
+    elif r >= 55:
+        return {"label": f"Yüksek ({r:.0f})",       "cls": "high-rsi"}
+    else:
+        return {"label": f"Normal ({r:.0f})",        "cls": "neutral"}
+
+# ==============================================================================
+#  TRADINGVIEW VERİ ÇEKME
 # ==============================================================================
 
 def _fetch():
-    global HISSE_LISTESI
     try:
         from tradingview_screener import Query
     except ImportError:
         import subprocess, sys
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "tradingview_screener"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install",
+                               "tradingview_screener"])
         from tradingview_screener import Query
 
     with _lock:
         _cache["loading"] = True
         _cache["error"]   = None
-        # We don't have a reliable progress bar since it's 1 request, just say 0 -> 100%
         _progress["done"] = 0
         _progress["total"] = 613
 
     results = []
-    
     try:
-        q = Query().set_markets('turkey').select(
-            'name', 'description', 'close', 'price_earnings_ttm', 
-            'price_book_ratio', 'dividend_yield_recent', 
-            'market_cap_basic', 'volume'
-        ).limit(1000)
-        
-        _, df = q.get_scanner_data()
-        
+        _, df = (
+            Query()
+            .set_markets("turkey")
+            .select(
+                # Kimlik
+                "name", "description",
+                # Fiyat
+                "close", "change", "change_abs",
+                # Temel Analiz
+                "price_earnings_ttm",       # F/K
+                "price_book_ratio",          # PD/DD
+                "price_sales_ratio",         # P/S
+                "market_cap_basic",          # Piyasa Değeri
+                "total_equity",              # Öz Sermaye
+                "ebitda_ttm",               # FAVÖK
+                "net_income_ttm",           # Net Kar
+                "after_tax_margin",          # Net Kar Marjı %
+                "dividend_yield_recent",     # Temettü
+                # Performans
+                "Perf.1Y", "Perf.3Y", "Perf.5Y", "Perf.6M", "Perf.1M",
+                # Hacim
+                "volume",
+                "average_volume_21d_calc",   # 21 günlük ort hacim
+                "average_volume_5d_calc",    # 5 günlük ort hacim
+                "relative_volume_10d_calc",  # Göreli hacim
+                # Teknik Göstergeler
+                "RSI",
+                "MACD.macd", "MACD.signal",
+                "Recommend.All",             # Genel teknik rating
+                "Recommend.MA",              # MA rating
+                "Recommend.Other",           # Osilatör rating
+                # Destek / Direnç — Klasik Pivot
+                "Pivot.M.Classic.S1",
+                "Pivot.M.Classic.S2",
+                "Pivot.M.Classic.R1",
+                "Pivot.M.Classic.R2",
+                "Pivot.M.Classic.Middle",
+            )
+            .limit(1000)
+            .get_scanner_data()
+        )
+
         for _, row in df.iterrows():
-            # Tradingview returns ticker as 'BIST:GARAN', name as 'GARAN'
-            # We construct sembol as 'GARAN.IS'
-            name = str(row.get('name', ''))
+            name   = str(row.get("name", ""))
             sembol = name + ".IS"
-            
-            def safe_float(val):
-                if val is None or str(val).lower() == 'nan': return None
-                try:
-                    f = float(val)
-                    return None if f != f else f
-                except Exception:
-                    return None
-            
-            div = safe_float(row.get('dividend_yield_recent'))
-            if div is not None:
-                # Tradingview returns dividend as percentage e.g., 4.02 for 4.02%
-                div = round(div / 100.0, 6)
-                
+            fiyat  = _sf(row.get("close"))
+
+            # Pivot noktaları
+            s1     = _sr(row.get("Pivot.M.Classic.S1"), 2)
+            s2     = _sr(row.get("Pivot.M.Classic.S2"), 2)
+            r1     = _sr(row.get("Pivot.M.Classic.R1"), 2)
+            r2     = _sr(row.get("Pivot.M.Classic.R2"), 2)
+            mid    = _sr(row.get("Pivot.M.Classic.Middle"), 2)
+
+            # Desteğe uzaklık ve dirençten getiri
+            destek_uzaklik = None
+            direnc_getiri  = None
+            destek_yakin   = False
+            if fiyat and s1 and s1 > 0:
+                destek_uzaklik = round(((fiyat - s1) / s1) * 100, 2)
+                if 0 <= destek_uzaklik <= 5:
+                    destek_yakin = True
+            if fiyat and r1 and fiyat > 0:
+                direnc_getiri = round(((r1 - fiyat) / fiyat) * 100, 2)
+
+            # MACD yönü
+            macd_v = _sf(row.get("MACD.macd"))
+            macd_s = _sf(row.get("MACD.signal"))
+            macd_bullish = (macd_v > macd_s) if (macd_v is not None and macd_s is not None) else None
+
+            # Temettü (TradingView % olarak veriyor)
+            div = _sf(row.get("dividend_yield_recent"))
+
+            rec = _sf(row.get("Recommend.All"))
+            rsi = _sf(row.get("RSI"))
+
+            # "Kara geçti" tespiti: Net Kar > 0 ve (önceki zarar bilinmiyorsa yeterli)
+            net_kar = _sf(row.get("net_income_ttm"))
+            kara_gecti = (net_kar is not None and net_kar > 0)
+
             results.append({
-                "sembol"       : sembol,
-                "ad"           : str(row.get('description', '')) or SIRKET_ADLARI.get(sembol, sembol),
-                "fiyat"        : safe_float(row.get('close')),
-                "fk"           : safe_float(row.get('price_earnings_ttm')),
-                "pd_dd"        : safe_float(row.get('price_book_ratio')),
-                "temettu"      : div,
-                "piyasa_degeri": safe_float(row.get('market_cap_basic')),
-                "hacim"        : safe_float(row.get('volume')),
-                "doviz"        : "TRY",
-                "hata"         : False,
+                "sembol":         sembol,
+                "ad":             str(row.get("description", name)),
+                # Fiyat
+                "fiyat":          _sr(row.get("close"), 2),
+                "degisim":        _sr(row.get("change"), 2),
+                # Temel
+                "fk":             _sr(row.get("price_earnings_ttm"), 2),
+                "pd_dd":          _sr(row.get("price_book_ratio"), 2),
+                "ps":             _sr(row.get("price_sales_ratio"), 2),
+                "piyasa_degeri":  _sf(row.get("market_cap_basic")),
+                "oz_sermaye":     _sf(row.get("total_equity")),
+                "favok":          _sf(row.get("ebitda_ttm")),
+                "net_kar":        net_kar,
+                "net_kar_marj":   _sr(row.get("after_tax_margin"), 1),
+                "temettu":        _sr(div, 2),
+                "kara_gecti":     kara_gecti,
+                # Performans
+                "perf_1m":  _sr(row.get("Perf.1M"), 1),
+                "perf_6m":  _sr(row.get("Perf.6M"), 1),
+                "perf_1y":  _sr(row.get("Perf.1Y"), 1),
+                "perf_3y":  _sr(row.get("Perf.3Y"), 1),
+                "perf_5y":  _sr(row.get("Perf.5Y"), 1),
+                # Hacim
+                "hacim":         _sf(row.get("volume")),
+                "hacim_21d":     _sf(row.get("average_volume_21d_calc")),
+                "hacim_5d":      _sf(row.get("average_volume_5d_calc")),
+                "rel_hacim":     _sr(row.get("relative_volume_10d_calc"), 2),
+                # Teknik
+                "rsi":           _sr(rsi, 1),
+                "rsi_signal":    _rsi_signal(rsi),
+                "macd":          _sr(macd_v, 4),
+                "macd_sig":      _sr(macd_s, 4),
+                "macd_bullish":  macd_bullish,
+                "recommend":     _sr(rec, 3),
+                "recommend_ma":  _sr(row.get("Recommend.MA"), 3),
+                "recommend_osc": _sr(row.get("Recommend.Other"), 3),
+                "signal":        _signal(rec),
+                # Destek / Direnç
+                "s1": s1, "s2": s2,
+                "r1": r1, "r2": r2,
+                "pivot_mid":      mid,
+                "destek_uzaklik": destek_uzaklik,
+                "direnc_getiri":  direnc_getiri,
+                "destek_yakin":   destek_yakin,
             })
-            
+
         with _lock:
-            _progress["done"] = len(results)
+            _progress["done"]  = len(results)
             _progress["total"] = len(results)
 
     except Exception as exc:
-        print("TradingView Fetch Error:", exc)
+        import traceback; traceback.print_exc()
         with _lock:
             _cache["error"] = str(exc)
 
@@ -108,76 +236,116 @@ def _fetch():
         _cache["updated_at"] = datetime.now().strftime("%d.%m.%Y %H:%M")
         _cache["loading"]    = False
 
+
+# ==============================================================================
+#  MEVSİMSEL ANALİZ (arka plan, yfinance)
+# ==============================================================================
+
+TOP_100 = [
+    "THYAO.IS","GARAN.IS","ASELS.IS","EREGL.IS","KCHOL.IS",
+    "SAHOL.IS","AKBNK.IS","ISCTR.IS","SISE.IS","TOASO.IS",
+    "FROTO.IS","PGSUS.IS","BIMAS.IS","MGROS.IS","TCELL.IS",
+    "TURSG.IS","ENKAI.IS","KOZAL.IS","PETKM.IS","ARCLK.IS",
+    "TUPRS.IS","SOKM.IS","HALKB.IS","VAKBN.IS","YKBNK.IS",
+    "SASA.IS","TAVHL.IS","CIMSA.IS","LOGO.IS","AEFES.IS",
+    "EKGYO.IS","ALARK.IS","TTKOM.IS","DOHOL.IS","VESTL.IS",
+    "AGHOL.IS","GUBRF.IS","OTKAR.IS","OYAKC.IS","TKFEN.IS",
+    "TSKB.IS","KRDMD.IS","BRSAN.IS","ENJSA.IS","AKENR.IS",
+    "SELEC.IS","ISFIN.IS","AKSEN.IS","AKFGY.IS","KONTR.IS",
+]
+
+MONTHS_TR = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"]
+
+def _fetch_seasonal():
+    with _lock:
+        _seasonal_cache["loading"] = True
+    try:
+        import yfinance as yf
+        from collections import defaultdict
+
+        monthly_data = defaultdict(lambda: defaultdict(list))
+
+        for ticker in TOP_100:
+            try:
+                hist = yf.download(ticker, period="5y", interval="1mo",
+                                   progress=False, auto_adjust=True)
+                if hist.empty:
+                    continue
+                closes = hist["Close"].squeeze()
+                returns = closes.pct_change().dropna() * 100
+                for dt, ret in returns.items():
+                    if ret == ret:  # not NaN
+                        monthly_data[ticker][dt.month].append(float(ret))
+            except Exception:
+                continue
+
+        seasonal = {}
+        for ticker, months in monthly_data.items():
+            seasonal[ticker] = {
+                MONTHS_TR[m - 1]: round(sum(v) / len(v), 2)
+                for m, v in months.items() if v
+            }
+
+        with _lock:
+            _seasonal_cache["data"]       = seasonal
+            _seasonal_cache["updated_at"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+    except Exception as e:
+        print("Seasonal fetch error:", e)
+    finally:
+        with _lock:
+            _seasonal_cache["loading"] = False
+
+
 # ==============================================================================
 #  API ENDPOİNTLERİ
 # ==============================================================================
 
 @app.route("/")
 def index():
-    """Ana HTML sayfasını serve eder."""
     return send_file(os.path.join(BASE_DIR, "index.html"))
-
 
 @app.route("/api/stocks")
 def api_stocks():
-    """
-    Hisse verilerini JSON olarak döndürür.
-    loading=True ise veriler henüz yükleniyor demektir.
-    progress ile kaç hisse tamamlandığı görülebilir.
-    """
     with _lock:
         return jsonify({
-            "stocks"    : _cache["stocks"] or [],
+            "stocks":     _cache["stocks"] or [],
             "updated_at": _cache["updated_at"],
-            "loading"   : _cache["loading"],
-            "progress"  : {
-                "done" : _progress["done"],
-                "total": _progress["total"],
-            },
+            "loading":    _cache["loading"],
+            "error":      _cache["error"],
+            "progress":   {"done": _progress["done"], "total": _progress["total"]},
         })
 
+@app.route("/api/seasonal")
+def api_seasonal():
+    with _lock:
+        return jsonify({
+            "data":       _seasonal_cache["data"] or {},
+            "updated_at": _seasonal_cache["updated_at"],
+            "loading":    _seasonal_cache["loading"],
+        })
 
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
-    """
-    Kullanıcı 'Yenile' butonuna basınca çağrılır.
-    Cache'i temizler ve yeni bir veri çekme thread'i başlatır.
-    """
     with _lock:
         if _cache["loading"]:
             return jsonify({"status": "already_loading"})
         _cache["stocks"]     = None
         _cache["updated_at"] = None
-
     threading.Thread(target=_fetch, daemon=True).start()
     return jsonify({"status": "started"})
 
-
 # ==============================================================================
-#  BAŞLANGIÇ (WSGI & Lokal)
+#  BAŞLANGIÇ
 # ==============================================================================
 
-# Gunicorn veya PythonAnywhere gibi WSGI sunucuları uygulamayı içe aktardığında
-# arka plan thread'inin başlaması için bunu global alanda tetikliyoruz.
-threading.Thread(target=_fetch, daemon=True).start()
+threading.Thread(target=_fetch,          daemon=True).start()
+threading.Thread(target=_fetch_seasonal, daemon=True).start()
 
 if __name__ == "__main__":
-    import sys, webbrowser
-
-    # Windows konsolunda UTF-8 (emoji ve Türkçe karakterler için)
+    import sys
     if sys.platform == "win32":
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
-
-    print("\n" + "=" * 58)
-    print("  BIST Hisse Senedi Tarayicisi")
-    print(f"  http://localhost:{PORT}  adresinde calisiyor")
-    print("  Tüm hisseler yükleniyor...")
-    print("=" * 58 + "\n")
-
-    # Tarayıcıyı otomatik aç
-    threading.Timer(1.5, lambda: webbrowser.open(f"http://localhost:{PORT}")).start()
-
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
