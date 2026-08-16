@@ -94,62 +94,78 @@ def _fetch():
         _progress["total"] = 613
 
     results = []
-    try:
-        _, df = (
-            Query()
-            .set_markets("turkey")
-            .select(
-                # Kimlik
-                "name", "description",
-                # Fiyat
-                "close", "change", "change_abs",
-                # Temel Analiz
-                "price_earnings_ttm",       # F/K
-                "price_book_ratio",          # PD/DD
-                "price_sales_ratio",         # P/S
-                "market_cap_basic",          # Piyasa Değeri
-                "total_equity",              # Öz Sermaye
-                "ebitda_ttm",               # FAVÖK
-                "net_income_ttm",           # Net Kar
-                "after_tax_margin",          # Net Kar Marjı %
-                "dividend_yield_recent",     # Temettü
-                # Performans
-                "Perf.1Y", "Perf.3Y", "Perf.5Y", "Perf.6M", "Perf.1M",
-                # Hacim
-                "volume",
-                "average_volume_21d_calc",   # 21 günlük ort hacim
-                "average_volume_5d_calc",    # 5 günlük ort hacim
-                "relative_volume_10d_calc",  # Göreli hacim
-                # Teknik Göstergeler
-                "RSI",
-                "MACD.macd", "MACD.signal",
-                "Recommend.All",             # Genel teknik rating
-                "Recommend.MA",              # MA rating
-                "Recommend.Other",           # Osilatör rating
-                # Destek / Direnç — Klasik Pivot
-                "Pivot.M.Classic.S1",
-                "Pivot.M.Classic.S2",
-                "Pivot.M.Classic.R1",
-                "Pivot.M.Classic.R2",
-                "Pivot.M.Classic.Middle",
-            )
-            .limit(1000)
-            .get_scanner_data()
-        )
 
+    # Önce tam sorguyu dene, başarısız olursa minimal sorguya geç
+    # Tam sorgu - tüm alanlar
+    FULL_FIELDS = [
+        "name", "description", "close", "change",
+        "price_earnings_ttm",        # F/K
+        "price_book_ratio",           # PD/DD
+        "price_sales_ratio",          # P/S
+        "market_cap_basic",           # Piyasa Değeri
+        "total_equity_mrq",           # Öz Sermaye
+        "ebitda_ttm",                # FAVÖK
+        "net_income_ttm",            # Net Kar
+        "after_tax_margin",           # Net Kar Marjı
+        "dividend_yield_recent",      # Temettü
+        "Perf.1Y", "Perf.3Y", "Perf.5Y", "Perf.6M", "Perf.1M",
+        "volume",
+        "average_volume_10d_calc",    # 10 günlük (21 yerine, daha stabil)
+        "average_volume_5d_calc",
+        "relative_volume_10d_calc",
+        "RSI", "MACD.macd", "MACD.signal",
+        "Recommend.All", "Recommend.MA", "Recommend.Other",
+        "Pivot.M.Classic.S1", "Pivot.M.Classic.S2",
+        "Pivot.M.Classic.R1", "Pivot.M.Classic.R2",
+        "Pivot.M.Classic.Middle",
+    ]
+    # Minimal fallback - yalnızca kesin çalışan alanlar
+    FALLBACK_FIELDS = [
+        "name", "description", "close", "change",
+        "price_earnings_ttm", "price_book_ratio",
+        "market_cap_basic", "dividend_yield_recent",
+        "Perf.1Y", "volume", "RSI",
+        "Recommend.All",
+        "Pivot.M.Classic.S1", "Pivot.M.Classic.R1",
+    ]
+
+    df = None
+    for fields in [FULL_FIELDS, FALLBACK_FIELDS]:
+        try:
+            _, df = (
+                Query()
+                .set_markets("turkey")
+                .select(*fields)
+                .limit(1000)
+                .get_scanner_data()
+            )
+            print(f"TradingView query OK with {len(fields)} fields -> {len(df)} rows")
+            break
+        except Exception as exc:
+            print(f"TradingView query failed with {len(fields)} fields: {exc}")
+            df = None
+
+    if df is None or len(df) == 0:
+        print("Both queries failed, returning empty results")
+        with _lock:
+            _cache["stocks"]     = []
+            _cache["updated_at"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+            _cache["loading"]    = False
+            _cache["error"]      = "TradingView veri çekme başarısız"
+        return
+
+    try:
         for _, row in df.iterrows():
             name   = str(row.get("name", ""))
             sembol = name + ".IS"
             fiyat  = _sf(row.get("close"))
 
-            # Pivot noktaları
             s1     = _sr(row.get("Pivot.M.Classic.S1"), 2)
             s2     = _sr(row.get("Pivot.M.Classic.S2"), 2)
             r1     = _sr(row.get("Pivot.M.Classic.R1"), 2)
             r2     = _sr(row.get("Pivot.M.Classic.R2"), 2)
             mid    = _sr(row.get("Pivot.M.Classic.Middle"), 2)
 
-            # Desteğe uzaklık ve dirençten getiri
             destek_uzaklik = None
             direnc_getiri  = None
             destek_yakin   = False
@@ -160,50 +176,40 @@ def _fetch():
             if fiyat and r1 and fiyat > 0:
                 direnc_getiri = round(((r1 - fiyat) / fiyat) * 100, 2)
 
-            # MACD yönü
             macd_v = _sf(row.get("MACD.macd"))
             macd_s = _sf(row.get("MACD.signal"))
             macd_bullish = (macd_v > macd_s) if (macd_v is not None and macd_s is not None) else None
 
-            # Temettü (TradingView % olarak veriyor)
-            div = _sf(row.get("dividend_yield_recent"))
-
-            rec = _sf(row.get("Recommend.All"))
-            rsi = _sf(row.get("RSI"))
-
-            # "Kara geçti" tespiti: Net Kar > 0 ve (önceki zarar bilinmiyorsa yeterli)
+            div     = _sf(row.get("dividend_yield_recent"))
+            rec     = _sf(row.get("Recommend.All"))
+            rsi     = _sf(row.get("RSI"))
             net_kar = _sf(row.get("net_income_ttm"))
             kara_gecti = (net_kar is not None and net_kar > 0)
 
             results.append({
                 "sembol":         sembol,
                 "ad":             str(row.get("description", name)),
-                # Fiyat
                 "fiyat":          _sr(row.get("close"), 2),
                 "degisim":        _sr(row.get("change"), 2),
-                # Temel
                 "fk":             _sr(row.get("price_earnings_ttm"), 2),
                 "pd_dd":          _sr(row.get("price_book_ratio"), 2),
                 "ps":             _sr(row.get("price_sales_ratio"), 2),
                 "piyasa_degeri":  _sf(row.get("market_cap_basic")),
-                "oz_sermaye":     _sf(row.get("total_equity")),
+                "oz_sermaye":     _sf(row.get("total_equity_mrq")),
                 "favok":          _sf(row.get("ebitda_ttm")),
                 "net_kar":        net_kar,
                 "net_kar_marj":   _sr(row.get("after_tax_margin"), 1),
                 "temettu":        _sr(div, 2),
                 "kara_gecti":     kara_gecti,
-                # Performans
                 "perf_1m":  _sr(row.get("Perf.1M"), 1),
                 "perf_6m":  _sr(row.get("Perf.6M"), 1),
                 "perf_1y":  _sr(row.get("Perf.1Y"), 1),
                 "perf_3y":  _sr(row.get("Perf.3Y"), 1),
                 "perf_5y":  _sr(row.get("Perf.5Y"), 1),
-                # Hacim
                 "hacim":         _sf(row.get("volume")),
-                "hacim_21d":     _sf(row.get("average_volume_21d_calc")),
+                "hacim_21d":     _sf(row.get("average_volume_10d_calc")),
                 "hacim_5d":      _sf(row.get("average_volume_5d_calc")),
                 "rel_hacim":     _sr(row.get("relative_volume_10d_calc"), 2),
-                # Teknik
                 "rsi":           _sr(rsi, 1),
                 "rsi_signal":    _rsi_signal(rsi),
                 "macd":          _sr(macd_v, 4),
@@ -213,7 +219,6 @@ def _fetch():
                 "recommend_ma":  _sr(row.get("Recommend.MA"), 3),
                 "recommend_osc": _sr(row.get("Recommend.Other"), 3),
                 "signal":        _signal(rec),
-                # Destek / Direnç
                 "s1": s1, "s2": s2,
                 "r1": r1, "r2": r2,
                 "pivot_mid":      mid,
@@ -225,9 +230,12 @@ def _fetch():
         with _lock:
             _progress["done"]  = len(results)
             _progress["total"] = len(results)
+        print(f"Fetch complete: {len(results)} stocks")
 
     except Exception as exc:
-        import traceback; traceback.print_exc()
+        import traceback
+        print("=== Row processing ERROR ===")
+        print(traceback.format_exc())
         with _lock:
             _cache["error"] = str(exc)
 
@@ -257,6 +265,24 @@ TOP_100 = [
 MONTHS_TR = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"]
 
 def _fetch_seasonal():
+    """
+    Yahoo Finance, bulut sunucularının IP adreslerini engelliyor.
+    Bu nedenle mevsimsel analiz şu an devre dışı bırakıldı.
+    Kullanıcı kendi bilgisayarında çalıştırdığında otomatik aktif olacak.
+    """
+    import socket
+    # Bulut ortamında (Render, Railway vb.) atla
+    hostname = socket.gethostname()
+    is_cloud = any(x in hostname.lower() for x in ["render", "railway", "heroku", "fly", "koyeb"])
+    is_local = hostname.lower() in ["localhost", "desktop"] or "islam" in hostname.lower()
+
+    if is_cloud:
+        print("Cloud ortamı tespit edildi, mevsimsel analiz atlanıyor (Yahoo Finance engeli)")
+        with _lock:
+            _seasonal_cache["data"]    = {}
+            _seasonal_cache["loading"] = False
+        return
+
     with _lock:
         _seasonal_cache["loading"] = True
     try:
@@ -274,7 +300,7 @@ def _fetch_seasonal():
                 closes = hist["Close"].squeeze()
                 returns = closes.pct_change().dropna() * 100
                 for dt, ret in returns.items():
-                    if ret == ret:  # not NaN
+                    if ret == ret:
                         monthly_data[ticker][dt.month].append(float(ret))
             except Exception:
                 continue
@@ -289,6 +315,7 @@ def _fetch_seasonal():
         with _lock:
             _seasonal_cache["data"]       = seasonal
             _seasonal_cache["updated_at"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+        print(f"Seasonal fetch complete: {len(seasonal)} stocks")
     except Exception as e:
         print("Seasonal fetch error:", e)
     finally:
