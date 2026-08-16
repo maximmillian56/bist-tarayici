@@ -1,4 +1,5 @@
 Flask==3.0.2
 tradingview_screener==3.2.1
 pandas==2.2.1
+yfinance==0.2.37
 gunicorn==21.2.0
