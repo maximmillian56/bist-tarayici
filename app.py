@@ -83,33 +83,33 @@ def _sr(val, n=2):
 
 def _signal(recommend):
     if recommend is None:
-        return {"label": "—", "cls": "neutral", "icon": "->"}
+        return {"label": "\u2014", "cls": "neutral", "icon": "\u27a1\ufe0f"}
     r = float(recommend)
     if r >= 0.5:
-        return {"label": "Guclu Al",  "cls": "strong-buy",  "icon": "^^"}
+        return {"label": "G\u00fc\u00e7l\u00fc Al",  "cls": "strong-buy",  "icon": "\U0001f680"}
     elif r >= 0.1:
-        return {"label": "Al",        "cls": "buy",         "icon": "^"}
+        return {"label": "Al",        "cls": "buy",         "icon": "\U0001f4c8"}
     elif r > -0.1:
-        return {"label": "Notr",      "cls": "neutral",     "icon": "->"}
+        return {"label": "N\u00f6tr",      "cls": "neutral",     "icon": "\u27a1\ufe0f"}
     elif r > -0.5:
-        return {"label": "Sat",       "cls": "sell",        "icon": "v"}
+        return {"label": "Sat",       "cls": "sell",        "icon": "\U0001f4c9"}
     else:
-        return {"label": "Guclu Sat", "cls": "strong-sell", "icon": "vv"}
+        return {"label": "G\u00fc\u00e7l\u00fc Sat", "cls": "strong-sell", "icon": "\U0001f53b"}
 
 def _rsi_signal(rsi):
     if rsi is None:
-        return {"label": "—", "cls": "neutral"}
+        return {"label": "\u2014", "cls": "neutral", "icon": ""}
     r = float(rsi)
     if r < 30:
-        return {"label": f"Asiri Satim ({r:.0f})", "cls": "oversold"}
+        return {"label": f"A\u015f\u0131r\u0131 Sat\u0131m ({r:.0f})", "cls": "oversold",   "icon": "\U0001f535"}
     elif r > 70:
-        return {"label": f"Asiri Alim ({r:.0f})",  "cls": "overbought"}
+        return {"label": f"A\u015f\u0131r\u0131 Al\u0131m ({r:.0f})",  "cls": "overbought", "icon": "\U0001f534"}
     elif r <= 45:
-        return {"label": f"Dusuk ({r:.0f})",        "cls": "low-rsi"}
+        return {"label": f"D\u00fc\u015f\u00fck ({r:.0f})",        "cls": "low-rsi",    "icon": "\u2b07\ufe0f"}
     elif r >= 55:
-        return {"label": f"Yuksek ({r:.0f})",       "cls": "high-rsi"}
+        return {"label": f"Y\u00fcksek ({r:.0f})",       "cls": "high-rsi",   "icon": "\u2b06\ufe0f"}
     else:
-        return {"label": f"Normal ({r:.0f})",        "cls": "neutral"}
+        return {"label": f"Normal ({r:.0f})",        "cls": "neutral",    "icon": "\u27a1\ufe0f"}
 
 # ==============================================================================
 #  VERİ ÇEKME — DİREKT API
