@@ -385,9 +385,8 @@ def api_test():
 # ==============================================================================
 #  BAŞLANGIÇ
 # ==============================================================================
-
-threading.Thread(target=_fetch,          daemon=True).start()
-threading.Thread(target=_fetch_seasonal, daemon=True).start()
+# NOT: Gunicorn için thread'ler gunicorn.conf.py'deki post_fork hook'ta baslatilir.
+# Lokalde dogrudan calistirilirsa asagidaki __main__ blogu devreye girer.
 
 if __name__ == "__main__":
     import sys
@@ -396,4 +395,7 @@ if __name__ == "__main__":
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
+    # Lokal gelistirme: thread'leri buradan baslat
+    threading.Thread(target=_fetch,          daemon=True).start()
+    threading.Thread(target=_fetch_seasonal, daemon=True).start()
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
