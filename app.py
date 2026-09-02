@@ -32,19 +32,37 @@ SCAN_COLUMNS = [
     "price_book_ratio",           # PD/DD
     "price_sales_ratio",          # P/S
     "market_cap_basic",           # Piyasa Değeri
-    "total_equity_mrq",           # Öz Sermaye
-    "ebitda_ttm",                # FAVÖK
-    "net_income_ttm",            # Net Kar
+    "total_revenue_ttm",          # Toplam Gelir (FAVÖK/Gelir için)
+    "gross_margin",               # Brüt Kar Marjı (TV'de: gross_margin)
+    "ebitda_ttm",                 # FAVÖK
+    "enterprise_value_ebitda_ttm",# EV/FAVÖK
+    "net_income_ttm",             # Net Kar (TTM)
+    "net_income_fq",              # Net Kar (Son Çeyrek)
+    "net_income_fq_prev",         # Net Kar (Önceki Çeyrek)
     "after_tax_margin",           # Net Kar Marjı
     "dividend_yield_recent",      # Temettü
+    "sector",                     # Sektör (geniş)
+    "industry",                   # Sektör (detaylı — banka/GYO ayrımı için)
     "Perf.1Y", "Perf.3Y", "Perf.5Y", "Perf.6M", "Perf.1M",
     "volume",
     "average_volume_10d_calc",
     "average_volume_5d_calc",
+    "average_volume_30d_calc",    # 30 günlük ortalama hacim
     "relative_volume_10d_calc",
     "RSI",
     "MACD.macd", "MACD.signal",
     "Recommend.All", "Recommend.MA", "Recommend.Other",
+    # EMA (Üstel Hareketli Ortalamalar)
+    "EMA20", "EMA25", "EMA50", "EMA100", "EMA200",
+    # Bollinger Bantları (20 günlük, 2 std)
+    "BB.upper", "BB.lower", "BB.basis",
+    # Beta (endekse göre oynaklık)
+    "beta_1_year",
+    # Günlük OHLC (pivot hesabı için)
+    "open", "high", "low",
+    # Aylık OHLC (aylık pivot için)
+    "High.1M", "Low.1M",
+    # Aylık pivot (TradingView destekler)
     "Pivot.M.Classic.S1", "Pivot.M.Classic.S2",
     "Pivot.M.Classic.R1", "Pivot.M.Classic.R2",
     "Pivot.M.Classic.Middle",
@@ -112,8 +130,204 @@ def _rsi_signal(rsi):
         return {"label": f"Normal ({r:.0f})",        "cls": "neutral",    "icon": "\u27a1\ufe0f"}
 
 # ==============================================================================
-#  VERİ ÇEKME — DİREKT API
+#  SEKTÖR EŞLEŞTİRME — TradingView Turkey Gerçek Değerleri
+#  Kaynak: scanner.tradingview.com/turkey/scan → sector + industry alanları
 # ==============================================================================
+
+# industry alanına göre öncelikli eşleştirme (daha spesifik)
+INDUSTRY_MAP = {
+    # ── BANKA ──
+    "Major Banks":               "bank",
+    "Regional Banks":            "bank",
+    "Investment Banks/Brokers":  "bank",
+    "Life/Health Insurance":     "bank",
+    "Multi-Line Insurance":      "bank",
+    "Property/Casualty Insurance": "bank",
+    "Finance/Rental/Leasing":   "bank",
+    "Financial Conglomerates":  "bank",
+    "Investment Managers":      "bank",
+    # ── GYO ──
+    "Real Estate Investment Trusts": "gyo",
+    "Real Estate Development":       "gyo",
+    "Homebuilding":                  "gyo",
+    # ── GIDA & İÇECEK ──
+    "Food: Major Diversified":    "gida",
+    "Food: Meat/Fish/Dairy":      "gida",
+    "Food: Specialty/Candy":      "gida",
+    "Food Retail":                "gida",
+    "Food Distributors":          "gida",
+    "Beverages: Alcoholic":       "gida",
+    "Beverages: Non-Alcoholic":   "gida",
+    "Agricultural Commodities/Milling": "gida",
+    "Restaurants":                "gida",
+    # ── HOLDİNG & YATIRIM ──
+    "Industrial Conglomerates":   "holding",
+    "Investment Trusts/Mutual Funds": "holding",
+    "Miscellaneous":              "holding",
+    # ── KİMYA, İLAÇ, PETROL, PLASTİK ──
+    "Chemicals: Major Diversified": "kimya",
+    "Chemicals: Specialty":        "kimya",
+    "Chemicals: Agricultural":     "kimya",
+    "Pharmaceuticals: Major":      "kimya",
+    "Pharmaceuticals: Other":      "kimya",
+    "Biotechnology":               "kimya",
+    "Oil Refining/Marketing":      "kimya",
+    "Integrated Oil":              "kimya",
+    "Industrial Specialties":      "kimya",
+    "Pulp & Paper":                "kimya",
+    "Containers/Packaging":        "kimya",
+    # ── METAL, MAKİNE, ELEKTRİKLİ, ULAŞIM ──
+    "Steel":                       "metal",
+    "Aluminum":                    "metal",
+    "Other Metals/Minerals":       "metal",
+    "Precious Metals":             "metal",
+    "Non-Energy Minerals":         "metal",
+    "Construction Materials":      "metal",
+    "Metal Fabrication":           "metal",
+    "Industrial Machinery":        "metal",
+    "Trucks/Construction/Farm Machinery": "metal",
+    "Auto Parts: OEM":             "metal",
+    "Motor Vehicles":              "metal",
+    "Aerospace & Defense":         "metal",
+    "Electrical Products":         "metal",
+    "Electronic Equipment/Instruments": "metal",
+    "Telecommunications Equipment": "metal",
+    "Airlines":                    "metal",
+    "Air Freight/Couriers":        "metal",
+    "Marine Shipping":             "metal",
+    "Other Transportation":        "metal",
+    "Railroads":                   "metal",
+    "Trucking":                    "metal",
+    "Building Products":           "metal",
+    # ── PERAKENDE TİCARET ──
+    "Food Retail":                 "perakende",
+    "Department Stores":           "perakende",
+    "Specialty Stores":            "perakende",
+    "Apparel/Footwear Retail":     "perakende",
+    "Electronics/Appliance Stores": "perakende",
+    "Internet Retail":             "perakende",
+    "Wholesale Distributors":      "perakende",
+    "Medical Distributors":        "perakende",
+    "Electronics Distributors":    "perakende",
+    # ── TEKNOLOJİ & BİLİŞİM ──
+    "Information Technology Services": "teknoloji",
+    "Packaged Software":           "teknoloji",
+    "Data Processing Services":    "teknoloji",
+    "Computer Communications":     "teknoloji",
+    "Computer Processing Hardware": "teknoloji",
+    "Semiconductors":              "teknoloji",
+    "Electronic Production Equipment": "teknoloji",
+    "Utilities: Alternative Power Generation": "teknoloji",
+    "Alternative Power Generation": "teknoloji",
+    "Electric Utilities":          "teknoloji",
+    "Gas Distributors":            "teknoloji",
+    # ── TEKSTİL, GİYİM ──
+    "Textiles":                    "tekstil",
+    "Apparel/Footwear":            "tekstil",
+    "Consumer Sundries":           "tekstil",
+    "Household/Personal Care":     "tekstil",
+}
+
+def _map_sector(sector_raw, industry_raw=None):
+    """
+    TradingView'ın döndürdüğü sector + industry string'lerini
+    uygulama sektör koduna çevirir.
+    industry daha spesifik olduğu için önce ona bakılır.
+    """
+    ind = str(industry_raw or "")
+    sec = str(sector_raw or "")
+
+    # 1. Önce industry'e tam eşleştirme
+    if ind in INDUSTRY_MAP:
+        return INDUSTRY_MAP[ind]
+
+    # 2. Sonra industry'e kısmi eşleştirme
+    ind_lo = ind.lower()
+    for key, val in INDUSTRY_MAP.items():
+        if key.lower() in ind_lo:
+            return val
+
+    # 3. sector bazlı geniş eşleştirme (fallback)
+    sec_lo = sec.lower()
+    if "finance" in sec_lo:            return "bank"
+    if "retail" in sec_lo:             return "perakende"
+    if "transport" in sec_lo:          return "metal"
+    if "technology" in sec_lo:         return "teknoloji"
+    if "consumer non-durable" in sec_lo: return "gida"
+    if "consumer durable" in sec_lo:   return "metal"
+    if "process" in sec_lo:            return "kimya"
+    if "producer" in sec_lo:           return "metal"
+    if "electronic" in sec_lo:         return "teknoloji"
+    if "non-energy" in sec_lo:         return "metal"
+    if "energy" in sec_lo:             return "kimya"
+    if "health" in sec_lo:             return "kimya"
+    if "industrial" in sec_lo:         return "metal"
+    if "utilities" in sec_lo:          return "teknoloji"
+
+    return "diger"
+
+
+# ==============================================================================
+#  BIST 100 LİSTESİ (Sabit — Güncelleme: Ağustos 2026)
+# ==============================================================================
+
+BIST100 = [
+    "THYAO","GARAN","ASELS","EREGL","KCHOL","SAHOL","AKBNK","ISCTR","SISE","TOASO",
+    "FROTO","PGSUS","BIMAS","MGROS","TCELL","TURSG","ENKAI","PETKM","ARCLK","TUPRS",
+    "SOKM","HALKB","VAKBN","YKBNK","SASA","TAVHL","CIMSA","LOGO","AEFES","EKGYO",
+    "ALARK","TTKOM","DOHOL","VESTL","OTKAR","TKFEN","TSKB","KRDMD","ENJSA","AKENR",
+    "SELEC","AKSEN","KONTR","GUBRF","OYAKC","BRSAN","ISFIN","AKFGY","AGHOL","TTRAK",
+    "SODA","KOZAL","KERVT","MPARK","ZOREN","HLGYO","IHLGM","TRGYO","ULAS","BTCIM",
+    "CEMTS","ULKER","TMSN","ALKIM","EGEEN","INDES","DOAS","BERA","ODAS","GENIL",
+    "ISDMR","KAREL","KOPOL","KLRHO","MIPAZ","NETAS","PRKAB","RYSAS","SNPAM","ULUSE",
+    "YATAS","YESIL","YGYO","ZEDUR","ADANA","ADEL","AKGRT","ALCO","ALTINS","ANFAS",
+    "ASUZU","ATAGY","ATAKP","ATEKS","ATLAS","AVSA","AYEN","AZTEK","BAGFS","BAKAB",
+]
+BIST100_SET = set(t + ".IS" for t in BIST100)
+
+# ==============================================================================
+#  XKTUM — BIST KATİLIM 100 ENDEKSİ (Sabit Liste — Eylül 2026)
+# ==============================================================================
+# Faizli geliri toplam gelirin %5'inden az olan, Katılım finans kurallarına
+# uyan şirketler. Kaynak: BIST Katılım Endeksi bileşenleri.
+
+XKTUM = [
+    "THYAO","ASELS","EREGL","KCHOL","TOASO","FROTO","PGSUS","BIMAS","ARCLK","TUPRS",
+    "SOKM","SASA","TAVHL","CIMSA","LOGO","ALARK","DOHOL","VESTL","OTKAR","TKFEN",
+    "KRDMD","ENJSA","AKENR","SELEC","AKSEN","KONTR","GUBRF","OYAKC","BRSAN","TTRAK",
+    "SODA","KOZAL","KERVT","MPARK","ZOREN","IHLGM","ULAS","BTCIM","CEMTS","ULKER",
+    "TMSN","ALKIM","EGEEN","INDES","DOAS","BERA","ODAS","GENIL","ISDMR","KAREL",
+    "KOPOL","KLRHO","MIPAZ","NETAS","PRKAB","RYSAS","SNPAM","ULUSE","YATAS","YESIL",
+    "ADANA","ADEL","ALCO","ALTINS","ANFAS","ASUZU","ATAKP","ATEKS","AVSA","AYEN",
+    "BAGFS","BAKAB","BFREN","BIOEN","BOSSA","BRKO","BURCE","CEMAS","CIMSA","CWENE",
+    "DEVA","DGKLB","DYOBY","ECILC","ECZYT","EDIP","EGGUB","EGPRO","EMKEL","ENERY",
+    "FMIZP","GESAN","GLYHO","GOODY","GRSEL","GSDHO","GUBRF","HATEK","HEKTS","HLGYO",
+]
+XKTUM_SET = set(t + ".IS" for t in XKTUM)
+
+# ==============================================================================
+#  HACİM SİNYALİ HESABI
+# ==============================================================================
+
+def _hacim_sinyal(volume, avg_7d, avg_30d):
+    """
+    Günlük hacim → 7 günlük ortalama kıyasına göre sinyal üret.
+    1.5x → Al, 2x+ → Güçlü Al, yoksa Normal
+    """
+    if volume is None:
+        return {"label": "—", "cls": "neutral", "icon": ""}
+    ref = avg_7d if avg_7d else avg_30d
+    if ref is None or ref == 0:
+        return {"label": "Normal", "cls": "neutral", "icon": "📊"}
+    ratio = volume / ref
+    if ratio >= 2.0:
+        return {"label": f"Güçlü Al ({ratio:.1f}x)", "cls": "strong-buy", "icon": "🚀"}
+    if ratio >= 1.5:
+        return {"label": f"Al ({ratio:.1f}x)", "cls": "buy", "icon": "📈"}
+    if ratio >= 0.8:
+        return {"label": "Normal", "cls": "neutral", "icon": "📊"}
+    return {"label": f"Düşük ({ratio:.1f}x)", "cls": "low-rsi", "icon": "📉"}
+
 
 def _fetch():
     print("=== _fetch() basladi ===", flush=True)
@@ -169,11 +383,37 @@ def _fetch():
                 sembol = name + ".IS"
                 fiyat  = _sf(gc("close"))
 
+                # ── Aylık Pivot (TradingView destekli) ──
                 s1  = _sr(gc("Pivot.M.Classic.S1"), 2)
                 s2  = _sr(gc("Pivot.M.Classic.S2"), 2)
                 r1  = _sr(gc("Pivot.M.Classic.R1"), 2)
                 r2  = _sr(gc("Pivot.M.Classic.R2"), 2)
                 mid = _sr(gc("Pivot.M.Classic.Middle"), 2)
+
+                # ── Günlük Pivot (Klasik formül: H+L+C /3) ──
+                d_h = _sf(gc("high"))
+                d_l = _sf(gc("low"))
+                d_c = fiyat
+                if d_h and d_l and d_c:
+                    mid_d = round((d_h + d_l + d_c) / 3, 2)
+                    s1_d  = round(2 * mid_d - d_h, 2)
+                    r1_d  = round(2 * mid_d - d_l, 2)
+                    s2_d  = round(mid_d - (d_h - d_l), 2)
+                    r2_d  = round(mid_d + (d_h - d_l), 2)
+                else:
+                    mid_d = s1_d = s2_d = r1_d = r2_d = None
+
+                # ── Aylık Pivot (High.1M/Low.1M ile hesap) ──
+                m_h = _sf(gc("High.1M"))
+                m_l = _sf(gc("Low.1M"))
+                if m_h and m_l and d_c:
+                    mid_w = round((m_h + m_l + d_c) / 3, 2)
+                    s1_w  = round(2 * mid_w - m_h, 2)
+                    r1_w  = round(2 * mid_w - m_l, 2)
+                    s2_w  = round(mid_w - (m_h - m_l), 2)
+                    r2_w  = round(mid_w + (m_h - m_l), 2)
+                else:
+                    mid_w = s1_w = s2_w = r1_w = r2_w = None
 
                 destek_uzaklik = None
                 direnc_getiri  = None
@@ -185,6 +425,7 @@ def _fetch():
                 if fiyat and r1 and fiyat > 0:
                     direnc_getiri = round(((r1 - fiyat) / fiyat) * 100, 2)
 
+
                 macd_v = _sf(gc("MACD.macd"))
                 macd_s = _sf(gc("MACD.signal"))
                 macd_bullish = (macd_v > macd_s) if (macd_v is not None and macd_s is not None) else None
@@ -195,6 +436,79 @@ def _fetch():
                 net_kar = _sf(gc("net_income_ttm"))
                 kara_gecti = (net_kar is not None and net_kar > 0)
 
+                # ── Çeyrek Kâr Karşılaştırması ──
+                net_kar_fq      = _sf(gc("net_income_fq"))
+                net_kar_fq_prev = _sf(gc("net_income_fq_prev"))
+                ceyrek_buyume = None
+                if net_kar_fq is not None and net_kar_fq_prev is not None and net_kar_fq_prev != 0:
+                    ceyrek_buyume = round(((net_kar_fq - net_kar_fq_prev) / abs(net_kar_fq_prev)) * 100, 1)
+                ceyrek_karda = (net_kar_fq is not None and net_kar_fq_prev is not None
+                                and net_kar_fq > net_kar_fq_prev)
+
+                # ── EV/FAVÖK ──
+                ev_favok = _sr(gc("enterprise_value_ebitda_ttm"), 2)
+
+                # ── Sektör (sector + industry ile doğru eşleştirme) ──
+                sektor_raw    = gc("sector") or ""
+                industry_raw  = gc("industry") or ""
+                sektor = _map_sector(str(sektor_raw), str(industry_raw))
+
+                # ── BIST100 + XKTUM ──
+                is_bist100 = sembol in BIST100_SET
+                is_xktum   = sembol in XKTUM_SET
+
+                # ── EMA Hesapları ──
+                ema20  = _sf(gc("EMA20"))
+                ema25  = _sf(gc("EMA25"))
+                ema50  = _sf(gc("EMA50"))
+                ema100 = _sf(gc("EMA100"))
+                ema200 = _sf(gc("EMA200"))
+                ema20_ustu  = (fiyat > ema20)  if (fiyat and ema20)  else None
+                ema25_ustu  = (fiyat > ema25)  if (fiyat and ema25)  else None
+                ema50_ustu  = (fiyat > ema50)  if (fiyat and ema50)  else None
+                ema100_ustu = (fiyat > ema100) if (fiyat and ema100) else None
+                ema200_ustu = (fiyat > ema200) if (fiyat and ema200) else None
+
+                # ── Bollinger Bantları ──
+                bb_upper = _sf(gc("BB.upper"))
+                bb_lower = _sf(gc("BB.lower"))
+                bb_basis = _sf(gc("BB.basis"))
+                bb_pozisyon = None  # 0=alt bant, 100=üst bant
+                bb_genislik = None  # bant genişliği % (sıkışma tespiti)
+                if bb_upper and bb_lower and fiyat:
+                    bant_araligi = bb_upper - bb_lower
+                    if bant_araligi > 0:
+                        bb_pozisyon = round((fiyat - bb_lower) / bant_araligi * 100, 1)
+                if bb_upper and bb_lower and bb_basis and bb_basis > 0:
+                    bb_genislik = round((bb_upper - bb_lower) / bb_basis * 100, 1)
+
+                # ── Beta ──
+                beta = _sr(gc("beta_1_year"), 2)
+
+                # ── FAVÖK/Gelir (EBITDA Marjı) ──
+                # TradingView TR piyasası için öz kaynak (equity) verisi gelmiyor.
+                # Bunun yerine FAVÖK/Toplam Gelir = EBITDA Marjı kullanıyoruz.
+                toplam_gelir    = _sf(gc("total_revenue_ttm"))
+                brut_kar_marji  = _sr(gc("gross_margin"), 1)
+                favok_val       = _sf(gc("ebitda_ttm"))
+                favok_oz_kaynak = None  # Sütun adı korunuyor (frontend değişmesin)
+                if favok_val and toplam_gelir and toplam_gelir != 0:
+                    favok_oz_kaynak = round(favok_val / toplam_gelir, 2)  # EBITDA marjı
+
+                # ── Hacim Hesapları ──
+                hacim     = _sf(gc("volume"))
+                hacim_7d  = _sf(gc("average_volume_5d_calc"))   # 5 günlük ≈ haftalık
+                hacim_10d = _sf(gc("average_volume_10d_calc"))
+                hacim_30d = _sf(gc("average_volume_30d_calc"))
+                hacim_sig = _hacim_sinyal(hacim, hacim_7d, hacim_10d)
+                hacim_oran = None
+                ref_vol = hacim_7d or hacim_10d
+                if hacim and ref_vol and ref_vol > 0:
+                    hacim_oran = round(hacim / ref_vol, 2)
+
+                # ── Döviz Geliri/Gideri (Placeholder) ──
+                doviz_gelir_fazlasi = None  # KAP entegrasyonu bekliyor
+
                 results.append({
                     "sembol":        sembol,
                     "ad":            str(gc("description") or name),
@@ -204,32 +518,70 @@ def _fetch():
                     "pd_dd":         _sr(gc("price_book_ratio"), 2),
                     "ps":            _sr(gc("price_sales_ratio"), 2),
                     "piyasa_degeri": _sf(gc("market_cap_basic")),
-                    "oz_sermaye":    _sf(gc("total_equity_mrq")),
-                    "favok":         _sf(gc("ebitda_ttm")),
+                    "toplam_gelir":  toplam_gelir,
+                    "brut_kar_marji": brut_kar_marji,
+                    "favok":         favok_val,
+                    "ev_favok":      ev_favok,
+                    "favok_oz_kaynak": favok_oz_kaynak,  # Gerçekte FAVÖK/Gelir (EBITDA marjı)
                     "net_kar":       net_kar,
+                    "net_kar_fq":    net_kar_fq,
+                    "net_kar_fq_prev": net_kar_fq_prev,
+                    "ceyrek_buyume": ceyrek_buyume,
+                    "ceyrek_karda":  ceyrek_karda,
                     "net_kar_marj":  _sr(gc("after_tax_margin"), 1),
                     "temettu":       _sr(div, 2),
                     "kara_gecti":    kara_gecti,
-                    "perf_1m":  _sr(gc("Perf.1M"), 1),
-                    "perf_6m":  _sr(gc("Perf.6M"), 1),
-                    "perf_1y":  _sr(gc("Perf.1Y"), 1),
-                    "perf_3y":  _sr(gc("Perf.3Y"), 1),
-                    "perf_5y":  _sr(gc("Perf.5Y"), 1),
-                    "hacim":    _sf(gc("volume")),
-                    "hacim_21d": _sf(gc("average_volume_10d_calc")),
-                    "hacim_5d":  _sf(gc("average_volume_5d_calc")),
-                    "rel_hacim": _sr(gc("relative_volume_10d_calc"), 2),
-                    "rsi":        _sr(rsi, 1),
-                    "rsi_signal": _rsi_signal(rsi),
-                    "macd":       _sr(macd_v, 4),
-                    "macd_sig":   _sr(macd_s, 4),
-                    "macd_bullish": macd_bullish,
-                    "recommend":    _sr(rec, 3),
-                    "recommend_ma": _sr(gc("Recommend.MA"), 3),
-                    "recommend_osc":_sr(gc("Recommend.Other"), 3),
-                    "signal":       _signal(rec),
-                    "s1": s1, "s2": s2, "r1": r1, "r2": r2,
-                    "pivot_mid":      mid,
+                    "sektor":        sektor,
+                    "sektor_raw":    sektor_raw,
+                    "industry_raw":  industry_raw,
+                    "is_bist100":    is_bist100,
+                    "is_xktum":      is_xktum,
+                    "perf_1m":       _sr(gc("Perf.1M"), 1),
+                    "perf_6m":       _sr(gc("Perf.6M"), 1),
+                    "perf_1y":       _sr(gc("Perf.1Y"), 1),
+                    "perf_3y":       _sr(gc("Perf.3Y"), 1),
+                    "perf_5y":       _sr(gc("Perf.5Y"), 1),
+                    # Hacim
+                    "hacim":         hacim,
+                    "hacim_7d":      hacim_7d,
+                    "hacim_10d":     hacim_10d,
+                    "hacim_30d":     hacim_30d,
+                    "hacim_oran":    hacim_oran,
+                    "hacim_sinyal":  hacim_sig,
+                    "rel_hacim":     _sr(gc("relative_volume_10d_calc"), 2),
+                    # RSI & MACD
+                    "rsi":           _sr(rsi, 1),
+                    "rsi_signal":    _rsi_signal(rsi),
+                    "macd":          _sr(macd_v, 4),
+                    "macd_sig":      _sr(macd_s, 4),
+                    "macd_bullish":  macd_bullish,
+                    # Sinyaller
+                    "recommend":     _sr(rec, 3),
+                    "recommend_ma":  _sr(gc("Recommend.MA"), 3),
+                    "recommend_osc": _sr(gc("Recommend.Other"), 3),
+                    "signal":        _signal(rec),
+                    # EMA
+                    "ema20": _sr(ema20, 2), "ema25": _sr(ema25, 2),
+                    "ema50": _sr(ema50, 2), "ema100": _sr(ema100, 2), "ema200": _sr(ema200, 2),
+                    "ema20_ustu": ema20_ustu, "ema25_ustu": ema25_ustu,
+                    "ema50_ustu": ema50_ustu, "ema100_ustu": ema100_ustu,
+                    "ema200_ustu": ema200_ustu,
+                    # Bollinger
+                    "bb_upper": _sr(bb_upper, 2), "bb_lower": _sr(bb_lower, 2),
+                    "bb_basis": _sr(bb_basis, 2), "bb_pozisyon": bb_pozisyon,
+                    "bb_genislik": bb_genislik,
+                    # Beta
+                    "beta": beta,
+                    # FAVÖK/ÖzKaynak
+                    "favok_oz_kaynak": favok_oz_kaynak,
+                    # Döviz (placeholder)
+                    "doviz_gelir_fazlasi": doviz_gelir_fazlasi,
+                    # Pivot — Aylık
+                    "s1": s1, "s2": s2, "r1": r1, "r2": r2, "pivot_mid": mid,
+                    # Pivot — Günlük
+                    "s1_d": s1_d, "s2_d": s2_d, "r1_d": r1_d, "r2_d": r2_d, "pivot_mid_d": mid_d,
+                    # Pivot — Aylık OHLC bazlı
+                    "s1_w": s1_w, "s2_w": s2_w, "r1_w": r1_w, "r2_w": r2_w, "pivot_mid_w": mid_w,
                     "destek_uzaklik": destek_uzaklik,
                     "direnc_getiri":  direnc_getiri,
                     "destek_yakin":   destek_yakin,
@@ -381,6 +733,31 @@ def api_test():
                         "sample": r.json().get("data", [])[:2]})
     except Exception as e:
         return jsonify({"error": str(e)})
+
+@app.route("/api/news/<ticker>")
+def api_news(ticker):
+    """
+    KAP.org.tr haber sentiment endpoint.
+    Şu an placeholder — ileride gerçek KAP scraping eklenecek.
+    Dönüş: {"ticker": "GARAN", "sentiment": "iyi|notr|kotu", "news": [...]}
+    """
+    # Placeholder: rastgele ama tutarlı sentiment (ticker hash'e göre)
+    import hashlib
+    h = int(hashlib.md5(ticker.encode()).hexdigest(), 16) % 3
+    sentiments = ["iyi", "notr", "kotu"]
+    sentiment  = sentiments[h]
+    badge_map  = {"iyi": "🟢 İyi", "notr": "🟡 Nötr", "kotu": "🔴 Kötü"}
+    placeholder_news = [
+        {"tarih": "2026-08-15", "baslik": "KAP haberleri yakında entegre edilecek", "sentiment": "notr"},
+        {"tarih": "2026-08-01", "baslik": "Otomatik KAP tarama aktif değil", "sentiment": "notr"},
+    ]
+    return jsonify({
+        "ticker":    ticker.upper().replace(".IS",""),
+        "sentiment": sentiment,
+        "badge":     badge_map.get(sentiment, "—"),
+        "news":      placeholder_news,
+        "kaynak":    "placeholder — KAP entegrasyonu yapılacak",
+    })
 
 # ==============================================================================
 #  BAŞLANGIÇ
