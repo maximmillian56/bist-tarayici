@@ -449,7 +449,7 @@ td.nm{max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);
   <div class="tab-panel" id="panel-mevsim">
     <div class="sec-hdr"><h3>🌿 Mevsimsel Analiz — Aylık Ort. Getiri (5 Yıl)</h3><span class="cnt" id="cnt-mevsim"></span></div>
     <div id="seasonal-content" class="seasonal-wrap">
-      <div class="loading-wrap"><div class="spinner"></div><div class="loading-txt">Mevsimsel veriler hesaplanıyor (~5 dk)...</div></div>
+      <div class="loading-wrap"><div class="spinner"></div><div class="loading-txt">Mevsimsel veriler yükleniyor (~30 sn)...</div></div>
     </div>
   </div>
 
@@ -516,10 +516,13 @@ async function fetchSeasonal(){
   try{
     const r = await fetch("/api/seasonal");
     const d = await r.json();
-    if(d.loading){ setTimeout(fetchSeasonal,8000); return; }
+    if(d.loading){
+      // Henüz hazır değil — 2 saniyede bir tekrar dene (eski: 8sn)
+      setTimeout(fetchSeasonal, 2000); return;
+    }
     seasonalData = d.data;
     if(currentTab==="mevsim") renderSeasonal();
-  }catch(e){ setTimeout(fetchSeasonal,8000); }
+  }catch(e){ setTimeout(fetchSeasonal, 3000); }
 }
 
 async function doRefresh(){
@@ -939,7 +942,7 @@ function renderDestek(data){
 function renderSeasonal(){
   const el=document.getElementById("seasonal-content");
   if(!seasonalData||Object.keys(seasonalData).length===0){
-    el.innerHTML='<div class="loading-wrap"><div class="spinner"></div><div class="loading-txt">Mevsimsel veriler hesaplanıyor (~5 dk)...</div></div>';
+    el.innerHTML='<div class="loading-wrap"><div class="spinner"></div><div class="loading-txt">Mevsimsel veriler yükleniyor (~30 sn)...</div></div>';
     return;
   }
   const tickers=Object.keys(seasonalData);
@@ -973,8 +976,14 @@ function switchTab(tab,btn){
   document.querySelectorAll(".tab-panel").forEach(p=>p.classList.remove("active"));
   btn.classList.add("active");
   document.getElementById("panel-"+tab).classList.add("active");
-  if(tab==="mevsim") renderSeasonal();
-  else render();
+  if(tab==="mevsim"){
+    if(seasonalData && Object.keys(seasonalData).length>0){
+      renderSeasonal();  // Veri zaten hazır — hemen göster
+    } else {
+      renderSeasonal();  // loading spinner göster
+      fetchSeasonal();   // Hemen tekrar dene (polling'i beklemeden)
+    }
+  } else render();
 }
 
 // ═══════════════════════════════════════════════════════
