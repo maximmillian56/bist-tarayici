@@ -627,9 +627,15 @@ TOP_50 = [
     "BRSAN.IS","ISFIN.IS","AKFGY.IS","AGHOL.IS","TTRAK.IS",
 ]
 MONTHS_TR = ["Oca","Sub","Mar","Nis","May","Haz","Tem","Agu","Eyl","Eki","Kas","Ara"]
+SEASONAL_CACHE_FILE = os.path.join(os.path.dirname(__file__), "seasonal_cache.json")
 
 def _fetch_seasonal():
-    # Render / bulut ortamında atla (Yahoo Finance engelliyor)
+    """
+    Mevsimsel veri çekme — HIZLI versiyon.
+    yf.download() ile tüm hisseler TEK seferde çekilir.
+    Disk cache ile restart sonrası anında yüklenir.
+    """
+    # Render / bulut ortamında atla
     is_cloud = (
         os.environ.get("RENDER") or
         os.environ.get("RAILWAY_ENVIRONMENT") or
@@ -643,25 +649,65 @@ def _fetch_seasonal():
             _seasonal_cache["loading"] = False
         return
 
+    # ── 1. Disk cache'den oku (varsa anında yükle) ──
+    if os.path.exists(SEASONAL_CACHE_FILE):
+        try:
+            with open(SEASONAL_CACHE_FILE, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+            # 24 saatten tazeyse kullan
+            import datetime as dt2
+            saved_at = cached.get("saved_at", "")
+            if saved_at:
+                age_h = (dt2.datetime.now() - dt2.datetime.fromisoformat(saved_at)).total_seconds() / 3600
+                if age_h < 24:
+                    with _lock:
+                        _seasonal_cache["data"]       = cached["data"]
+                        _seasonal_cache["updated_at"] = cached.get("updated_at", "")
+                        _seasonal_cache["loading"]    = False
+                    print(f"Seasonal: disk cache'den yuklendi ({len(cached['data'])} hisse, {age_h:.1f}s once)", flush=True)
+                    return
+        except Exception as e:
+            print(f"Seasonal cache okuma hatasi: {e}", flush=True)
+
     with _lock:
         _seasonal_cache["loading"] = True
+
     try:
         import yfinance as yf
         from collections import defaultdict
+
+        print("Seasonal: toplu indirme basliyor...", flush=True)
+
+        # ── 2. Tüm hisseleri TEK seferde indir (çok daha hızlı) ──
+        tickers_str = " ".join(TOP_50)
+        hist = yf.download(
+            tickers_str,
+            period="5y",
+            interval="1mo",
+            progress=False,
+            auto_adjust=True,
+            group_by="ticker",
+        )
+
         monthly_data = defaultdict(lambda: defaultdict(list))
-        for ticker in TOP_50:
-            try:
-                hist = yf.download(ticker, period="5y", interval="1mo",
-                                   progress=False, auto_adjust=True)
-                if hist.empty:
+
+        if len(TOP_50) == 1:
+            # Tek sembol farklı yapı döndürür
+            closes  = hist["Close"].squeeze()
+            returns = closes.pct_change().dropna() * 100
+            for dt_idx, ret in returns.items():
+                if ret == ret and ret is not None:
+                    monthly_data[TOP_50[0]][dt_idx.month].append(float(ret))
+        else:
+            for ticker in TOP_50:
+                try:
+                    closes = hist[ticker]["Close"].squeeze()
+                    returns = closes.pct_change().dropna() * 100
+                    for dt_idx, ret in returns.items():
+                        if ret == ret and ret is not None:
+                            monthly_data[ticker][dt_idx.month].append(float(ret))
+                except Exception:
                     continue
-                closes  = hist["Close"].squeeze()
-                returns = closes.pct_change().dropna() * 100
-                for dt, ret in returns.items():
-                    if ret == ret:
-                        monthly_data[ticker][dt.month].append(float(ret))
-            except Exception:
-                continue
 
         seasonal = {}
         for ticker, months in monthly_data.items():
@@ -669,10 +715,26 @@ def _fetch_seasonal():
                 MONTHS_TR[m - 1]: round(sum(v) / len(v), 2)
                 for m, v in months.items() if v
             }
+
+        updated_at = datetime.now().strftime("%d.%m.%Y %H:%M")
+
         with _lock:
             _seasonal_cache["data"]       = seasonal
-            _seasonal_cache["updated_at"] = datetime.now().strftime("%d.%m.%Y %H:%M")
-        print(f"Seasonal complete: {len(seasonal)} stocks", flush=True)
+            _seasonal_cache["updated_at"] = updated_at
+        print(f"Seasonal: tamamlandi ({len(seasonal)} hisse)", flush=True)
+
+        # ── 3. Disk'e kaydet (sonraki restart için) ──
+        try:
+            with open(SEASONAL_CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump({
+                    "data":       seasonal,
+                    "updated_at": updated_at,
+                    "saved_at":   datetime.now().isoformat(),
+                }, f, ensure_ascii=False)
+            print("Seasonal: disk cache guncellendi.", flush=True)
+        except Exception as e:
+            print(f"Seasonal disk kayit hatasi: {e}", flush=True)
+
     except Exception as e:
         print("Seasonal error:", e, flush=True)
     finally:
