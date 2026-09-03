@@ -747,7 +747,12 @@ def _fetch_seasonal():
 
 @app.route("/")
 def index():
-    return send_file(os.path.join(BASE_DIR, "index.html"))
+    from flask import make_response
+    resp = make_response(send_file(os.path.join(BASE_DIR, "index.html")))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 @app.route("/api/stocks")
 def api_stocks():

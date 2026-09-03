@@ -490,7 +490,10 @@ let pivotTF     = "W";
 let hacimView   = "hacim";
 let chartTF     = "D";
 let chartSymbol = "";
-const MONTHS = ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
+// Backend'den gelen anahtarlarla eşleşmeli (aksansız)
+const MONTHS      = ["Oca","Sub","Mar","Nis","May","Haz","Tem","Agu","Eyl","Eki","Kas","Ara"];
+// Tablo başlıklarında gösterilecek (Türkçe karakterli)
+const MONTH_LABELS= ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
 
 // ═══════════════════════════════════════════════════════
 //  API
@@ -946,7 +949,7 @@ function renderSeasonal(){
     return;
   }
   const tickers=Object.keys(seasonalData);
-  const hdr=MONTHS.map(m=>`<th>${m}</th>`).join("");
+  const hdr=MONTH_LABELS.map(m=>`<th>${m}</th>`).join("");
   const rows=tickers.map(tk=>{
     const mo=seasonalData[tk];
     const cells=MONTHS.map(m=>{
