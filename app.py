@@ -37,10 +37,10 @@ SCAN_COLUMNS = [
     "ebitda_ttm",                 # FAVÖK
     "enterprise_value_ebitda_ttm",# EV/FAVÖK
     "net_income_ttm",             # Net Kar (TTM)
-    "net_income_fq",              # Net Kar (Son Çeyrek)
-    "net_income_fq_prev",         # Net Kar (Önceki Çeyrek)
+    "net_income_fq",              # Net Kar (Son Çeyrek) — prev TR'de null
     "after_tax_margin",           # Net Kar Marjı
-    "dividend_yield_recent",      # Temettü
+    "dividends_yield",            # Temettü Verimi % (dividend_yield_recent TR'de null)
+    "dps_common_stock_prim_issue_fy",  # Hisse Başı Temettü (TL)
     "sector",                     # Sektör (geniş)
     "industry",                   # Sektör (detaylı — banka/GYO ayrımı için)
     "Perf.1Y", "Perf.3Y", "Perf.5Y", "Perf.6M", "Perf.1M",
@@ -58,10 +58,16 @@ SCAN_COLUMNS = [
     "BB.upper", "BB.lower", "BB.basis",
     # Beta (endekse göre oynaklık)
     "beta_1_year",
-    # Günlük OHLC (pivot hesabı için)
+    # Günlük OHLC (günlük pivot hesabı)
     "open", "high", "low",
-    # Aylık OHLC (aylık pivot için)
+    # 4 Saatlik OHLC (4H pivot)
+    "open|240", "high|240", "low|240",
+    # Haftalık OHLC (haftalık pivot)
+    "open|1W", "high|1W", "low|1W",
+    # Aylık OHLC (aylık pivot)
     "High.1M", "Low.1M",
+    # 6 Aylık OHLC (6 aylık pivot)
+    "High.6M", "Low.6M",
     # Aylık pivot (TradingView destekler)
     "Pivot.M.Classic.S1", "Pivot.M.Classic.S2",
     "Pivot.M.Classic.R1", "Pivot.M.Classic.R2",
@@ -383,67 +389,78 @@ def _fetch():
                 sembol = name + ".IS"
                 fiyat  = _sf(gc("close"))
 
-                # ── Aylık Pivot (TradingView destekli) ──
+                def _pivot(h, l, c):
+                    """Klasik pivot noktası hesabı: P=(H+L+C)/3"""
+                    if not (h and l and c):
+                        return None, None, None, None, None
+                    p  = (h + l + c) / 3
+                    s1 = round(2*p - h, 2)
+                    r1 = round(2*p - l, 2)
+                    s2 = round(p - (h-l), 2)
+                    r2 = round(p + (h-l), 2)
+                    return round(p,2), s1, s2, r1, r2
+
+                # ── Aylık Pivot (TradingView API) ──
                 s1  = _sr(gc("Pivot.M.Classic.S1"), 2)
                 s2  = _sr(gc("Pivot.M.Classic.S2"), 2)
                 r1  = _sr(gc("Pivot.M.Classic.R1"), 2)
                 r2  = _sr(gc("Pivot.M.Classic.R2"), 2)
                 mid = _sr(gc("Pivot.M.Classic.Middle"), 2)
 
-                # ── Günlük Pivot (Klasik formül: H+L+C /3) ──
-                d_h = _sf(gc("high"))
-                d_l = _sf(gc("low"))
-                d_c = fiyat
-                if d_h and d_l and d_c:
-                    mid_d = round((d_h + d_l + d_c) / 3, 2)
-                    s1_d  = round(2 * mid_d - d_h, 2)
-                    r1_d  = round(2 * mid_d - d_l, 2)
-                    s2_d  = round(mid_d - (d_h - d_l), 2)
-                    r2_d  = round(mid_d + (d_h - d_l), 2)
-                else:
-                    mid_d = s1_d = s2_d = r1_d = r2_d = None
+                # ── Günlük Pivot (Klasik formül: H+L+C/3) ──
+                d_h = _sf(gc("high"));  d_l = _sf(gc("low"));  d_c = fiyat
+                mid_d, s1_d, s2_d, r1_d, r2_d = _pivot(d_h, d_l, d_c)
 
-                # ── Aylık Pivot (High.1M/Low.1M ile hesap) ──
-                m_h = _sf(gc("High.1M"))
-                m_l = _sf(gc("Low.1M"))
-                if m_h and m_l and d_c:
-                    mid_w = round((m_h + m_l + d_c) / 3, 2)
-                    s1_w  = round(2 * mid_w - m_h, 2)
-                    r1_w  = round(2 * mid_w - m_l, 2)
-                    s2_w  = round(mid_w - (m_h - m_l), 2)
-                    r2_w  = round(mid_w + (m_h - m_l), 2)
-                else:
-                    mid_w = s1_w = s2_w = r1_w = r2_w = None
+                # ── 4 Saatlik Pivot ──
+                h4_h = _sf(gc("high|240")); h4_l = _sf(gc("low|240")); h4_c = _sf(gc("close|240")) or fiyat
+                mid_4h, s1_4h, s2_4h, r1_4h, r2_4h = _pivot(h4_h, h4_l, h4_c)
 
+                # ── Haftalık Pivot ──
+                w_h = _sf(gc("high|1W")); w_l = _sf(gc("low|1W")); w_c = _sf(gc("close|1W")) or fiyat
+                mid_weekly, s1_weekly, s2_weekly, r1_weekly, r2_weekly = _pivot(w_h, w_l, w_c)
+
+                # ── Aylık OHLC Pivot (High.1M/Low.1M ile hesap) ──
+                m_h = _sf(gc("High.1M")); m_l = _sf(gc("Low.1M"))
+                mid_w, s1_w, s2_w, r1_w, r2_w = _pivot(m_h, m_l, d_c)
+
+                # ── 6 Aylık Pivot ──
+                s6_h = _sf(gc("High.6M")); s6_l = _sf(gc("Low.6M"))
+                mid_6m, s1_6m, s2_6m, r1_6m, r2_6m = _pivot(s6_h, s6_l, d_c)
+
+                # Destek yakınlığı (aylık S1'e göre)
                 destek_uzaklik = None
                 direnc_getiri  = None
                 destek_yakin   = False
-                if fiyat and s1 and s1 > 0:
-                    destek_uzaklik = round(((fiyat - s1) / s1) * 100, 2)
+                ref_s1 = s1 or s1_w or s1_d
+                ref_r1 = r1 or r1_w or r1_d
+                if fiyat and ref_s1 and ref_s1 > 0:
+                    destek_uzaklik = round(((fiyat - ref_s1) / ref_s1) * 100, 2)
                     if 0 <= destek_uzaklik <= 5:
                         destek_yakin = True
-                if fiyat and r1 and fiyat > 0:
-                    direnc_getiri = round(((r1 - fiyat) / fiyat) * 100, 2)
+                if fiyat and ref_r1 and fiyat > 0:
+                    direnc_getiri = round(((ref_r1 - fiyat) / fiyat) * 100, 2)
 
 
                 macd_v = _sf(gc("MACD.macd"))
                 macd_s = _sf(gc("MACD.signal"))
                 macd_bullish = (macd_v > macd_s) if (macd_v is not None and macd_s is not None) else None
 
-                div     = _sf(gc("dividend_yield_recent"))
+                # ── Temettü — dividends_yield çalışıyor (dividend_yield_recent TR'de null) ──
+                div_yield = _sf(gc("dividends_yield"))   # % olarak (ör: 4.13 = %4.13)
+                div_hisse = _sf(gc("dps_common_stock_prim_issue_fy"))  # TL cinsinden
+                temettu   = _sr(div_yield, 2)  # Frontend'de temettu olarak göster
+
                 rec     = _sf(gc("Recommend.All"))
                 rsi     = _sf(gc("RSI"))
                 net_kar = _sf(gc("net_income_ttm"))
                 kara_gecti = (net_kar is not None and net_kar > 0)
 
-                # ── Çeyrek Kâr Karşılaştırması ──
+                # ── Çeyrek Kâr — net_income_fq_prev TR'de null, tek başına fq kullan ──
                 net_kar_fq      = _sf(gc("net_income_fq"))
-                net_kar_fq_prev = _sf(gc("net_income_fq_prev"))
-                ceyrek_buyume = None
-                if net_kar_fq is not None and net_kar_fq_prev is not None and net_kar_fq_prev != 0:
-                    ceyrek_buyume = round(((net_kar_fq - net_kar_fq_prev) / abs(net_kar_fq_prev)) * 100, 1)
-                ceyrek_karda = (net_kar_fq is not None and net_kar_fq_prev is not None
-                                and net_kar_fq > net_kar_fq_prev)
+                net_kar_fq_prev = None  # TR'de gelmiyor
+                ceyrek_buyume   = None  # Hesaplanamıyor (prev yok)
+                # Son çeyrekte karda mı? (pozitif net gelir)
+                ceyrek_karda = (net_kar_fq is not None and net_kar_fq > 0)
 
                 # ── EV/FAVÖK ──
                 ev_favok = _sr(gc("enterprise_value_ebitda_ttm"), 2)
@@ -525,11 +542,12 @@ def _fetch():
                     "favok_oz_kaynak": favok_oz_kaynak,  # Gerçekte FAVÖK/Gelir (EBITDA marjı)
                     "net_kar":       net_kar,
                     "net_kar_fq":    net_kar_fq,
-                    "net_kar_fq_prev": net_kar_fq_prev,
+                     "net_kar_fq_prev": net_kar_fq_prev,
                     "ceyrek_buyume": ceyrek_buyume,
                     "ceyrek_karda":  ceyrek_karda,
                     "net_kar_marj":  _sr(gc("after_tax_margin"), 1),
-                    "temettu":       _sr(div, 2),
+                    "temettu":       temettu,       # dividends_yield (%)
+                    "temettu_hisse": _sr(div_hisse, 2),  # hisse başı TL
                     "kara_gecti":    kara_gecti,
                     "sektor":        sektor,
                     "sektor_raw":    sektor_raw,
@@ -572,16 +590,22 @@ def _fetch():
                     "bb_genislik": bb_genislik,
                     # Beta
                     "beta": beta,
-                    # FAVÖK/ÖzKaynak
+                    # FAVÖK/Gelir (EBITDA Marjı)
                     "favok_oz_kaynak": favok_oz_kaynak,
                     # Döviz (placeholder)
                     "doviz_gelir_fazlasi": doviz_gelir_fazlasi,
-                    # Pivot — Aylık
+                    # Pivot — Aylık (TradingView API)
                     "s1": s1, "s2": s2, "r1": r1, "r2": r2, "pivot_mid": mid,
                     # Pivot — Günlük
                     "s1_d": s1_d, "s2_d": s2_d, "r1_d": r1_d, "r2_d": r2_d, "pivot_mid_d": mid_d,
+                    # Pivot — 4 Saatlik
+                    "s1_4h": s1_4h, "s2_4h": s2_4h, "r1_4h": r1_4h, "r2_4h": r2_4h, "pivot_mid_4h": mid_4h,
+                    # Pivot — Haftalık
+                    "s1_w": s1_weekly, "s2_w": s2_weekly, "r1_w": r1_weekly, "r2_w": r2_weekly, "pivot_mid_w": mid_weekly,
                     # Pivot — Aylık OHLC bazlı
-                    "s1_w": s1_w, "s2_w": s2_w, "r1_w": r1_w, "r2_w": r2_w, "pivot_mid_w": mid_w,
+                    "s1_m": s1_w, "s2_m": s2_w, "r1_m": r1_w, "r2_m": r2_w, "pivot_mid_m": mid_w,
+                    # Pivot — 6 Aylık
+                    "s1_6m": s1_6m, "s2_6m": s2_6m, "r1_6m": r1_6m, "r2_6m": r2_6m, "pivot_mid_6m": mid_6m,
                     "destek_uzaklik": destek_uzaklik,
                     "direnc_getiri":  direnc_getiri,
                     "destek_yakin":   destek_yakin,

@@ -186,6 +186,17 @@ td.nm{max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);
 .news-notr{background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.3)}
 .news-kotu{background:rgba(239,68,68,.2);color:#f87171;border:1px solid rgba(239,68,68,.4)}
 .news-load{background:rgba(100,116,139,.15);color:var(--muted);border:1px solid var(--border)}
+
+/* ── FAVORİLER ── */
+.fav-star{background:transparent;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:0 3px;line-height:1;transition:color var(--tr)}
+.fav-star:hover{color:var(--yellow)}
+.fav-star.active{color:var(--yellow)}
+.s-btn.fav-btn.active{background:rgba(245,158,11,.25);border-color:var(--yellow);color:#fbbf24}
+tr.is-fav{background:rgba(245,158,11,.04)}
+
+/* ── TAM EKRAN ── */
+.btn-fullscreen{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;transition:all var(--tr);flex-shrink:0}
+.btn-fullscreen:hover{border-color:var(--primary);color:var(--text)}
 </style>
 </head>
 <body>
@@ -221,6 +232,7 @@ td.nm{max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);
   <div class="sektor-sep"></div>
   <button class="s-btn bist100-btn" id="bist100-btn" onclick="toggleBist100()">⭐ BIST100</button>
   <button class="s-btn xktum-btn"   id="xktum-btn"   onclick="toggleXktum()">☪️ XKTUM</button>
+  <button class="s-btn fav-btn"     id="fav-btn"     onclick="toggleFavOnly()">🌟 Favorilerim</button>
 </div>
 
 <!-- STATS BAR -->
@@ -302,14 +314,15 @@ td.nm{max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);
 
   <div class="sb-title">Özel Filtreler</div>
   <label class="fc"><input type="checkbox" id="f-destek-yakin" onchange="render()"><span>⭐ Desteğe Yakın (%5)</span></label>
-  <label class="fc"><input type="checkbox" id="f-kara-gecti"   onchange="render()"><span>🟢 Kâra Geçti</span></label>
-  <label class="fc"><input type="checkbox" id="f-ceyrek-karda" onchange="render()"><span>📈 Çeyrek Büyümesi (+)</span></label>
+  <label class="fc"><input type="checkbox" id="f-kara-gecti"   onchange="render()"><span>🟢 Kâra Geçti (TTM+)</span></label>
+  <label class="fc"><input type="checkbox" id="f-ceyrek-karda" onchange="render()"><span>📈 Son Çeyrekte Kâr (+)</span></label>
   <label class="fc"><input type="checkbox" id="f-oversold"     onchange="render()"><span>🔵 Aşırı Satım (RSI&lt;30)</span></label>
   <label class="fc"><input type="checkbox" id="f-strong-buy"   onchange="render()"><span>🚀 Güçlü Al Sinyali</span></label>
   <label class="fc"><input type="checkbox" id="f-macd-bull"    onchange="render()"><span>📈 MACD Boğa</span></label>
   <label class="fc"><input type="checkbox" id="f-temettu"      onchange="render()"><span>💰 Temettü Var</span></label>
   <label class="fc"><input type="checkbox" id="f-xktum"        onchange="render()"><span>☪️ XKTUM Uyumlu</span></label>
   <label class="fc"><input type="checkbox" id="f-ideal"        onchange="render()"><span>⭐ İdeal Hisse</span></label>
+  <label class="fc"><input type="checkbox" id="f-favori"       onchange="render()"><span>🌟 Sadece Favoriler</span></label>
 
   <button class="sb-reset" onclick="resetFilters()">⟳ Filtreleri Sıfırla</button>
 </aside>
@@ -340,6 +353,7 @@ td.nm{max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);
         <th onclick="sortBy('perf_1y')">1Y %</th>
         <th onclick="sortBy('recommend')">Sinyal</th>
         <th>BIST/XK</th>
+        <th>⭐</th>
       </tr></thead>
       <tbody id="tbody-genel"></tbody>
     </table></div>
@@ -427,9 +441,11 @@ td.nm{max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);
     <div class="sec-hdr"><h3>🎯 Destek / Direnç (Klasik Pivot)</h3><span class="cnt" id="cnt-destek"></span></div>
     <div class="tf-bar">
       <span class="tf-lbl">Pivot Zaman:</span>
-      <button class="tf-btn" data-tf="D" onclick="setPivotTF(this)">Günlük</button>
-      <button class="tf-btn active" data-tf="W" onclick="setPivotTF(this)">Aylık OHLC</button>
-      <button class="tf-btn" data-tf="M" onclick="setPivotTF(this)">Aylık Pivot</button>
+      <button class="tf-btn" data-tf="4H" onclick="setPivotTF(this)">4 Saatlik</button>
+      <button class="tf-btn" data-tf="D"  onclick="setPivotTF(this)">Günlük</button>
+      <button class="tf-btn active" data-tf="W" onclick="setPivotTF(this)">Haftalık</button>
+      <button class="tf-btn" data-tf="M"  onclick="setPivotTF(this)">Aylık</button>
+      <button class="tf-btn" data-tf="6M" onclick="setPivotTF(this)">6 Aylık</button>
     </div>
     <div class="table-wrap"><table>
       <thead><tr>
@@ -458,10 +474,12 @@ td.nm{max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);
 
 <!-- GRAFİK MODALİ -->
 <div class="modal-overlay" id="chart-modal" onclick="closeChartOnOverlay(event)">
-  <div class="modal-box">
+  <div class="modal-box" id="modal-box">
     <div class="modal-hdr">
       <h4 id="modal-title">—</h4>
       <span id="modal-news-badge" class="news-badge"></span>
+      <button id="modal-fav-btn" class="fav-star" onclick="toggleFavFromModal()" title="Favorilere ekle/çıkar">☆</button>
+      <button class="btn-fullscreen" onclick="toggleFullscreen()" title="Tam ekran">⛶ Tam Ekran</button>
       <button class="modal-close" onclick="closeChart()">✕</button>
     </div>
     <div class="modal-tf-bar">
@@ -486,14 +504,57 @@ let seasonalData= null;
 let activeSector= "hepsi";
 let bist100Only = false;
 let xktumOnly   = false;
+let favOnly     = false;
 let pivotTF     = "W";
 let hacimView   = "hacim";
 let chartTF     = "D";
 let chartSymbol = "";
+
+// Favoriler — localStorage'da kalıcı
+let favorites = new Set(JSON.parse(localStorage.getItem("bist_favorites") || "[]"));
+
+function saveFavorites(){
+  localStorage.setItem("bist_favorites", JSON.stringify([...favorites]));
+}
+function toggleFav(sembol){
+  if(favorites.has(sembol)) favorites.delete(sembol);
+  else favorites.add(sembol);
+  saveFavorites();
+  render();
+  // Modal'da açıksa güncelle
+  if(chartSymbol === sembol) updateModalFavBtn();
+}
+function updateModalFavBtn(){
+  const btn = document.getElementById("modal-fav-btn");
+  if(!btn) return;
+  const isFav = favorites.has(chartSymbol);
+  btn.textContent = isFav ? "★" : "☆";
+  btn.classList.toggle("active", isFav);
+  btn.title = isFav ? "Favorilerden çıkar" : "Favorilere ekle";
+}
+function toggleFavFromModal(){
+  toggleFav(chartSymbol);
+}
+function toggleFavOnly(){
+  favOnly=!favOnly;
+  document.getElementById("fav-btn").classList.toggle("active",favOnly);
+  document.getElementById("f-favori").checked = favOnly;
+  render();
+}
+function toggleFullscreen(){
+  const box = document.getElementById("modal-box");
+  if(!document.fullscreenElement){
+    box.requestFullscreen().catch(()=>{});
+  } else {
+    document.exitFullscreen();
+  }
+}
+
 // Backend'den gelen anahtarlarla eşleşmeli (aksansız)
 const MONTHS      = ["Oca","Sub","Mar","Nis","May","Haz","Tem","Agu","Eyl","Eki","Kas","Ara"];
 // Tablo başlıklarında gösterilecek (Türkçe karakterli)
 const MONTH_LABELS= ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"];
+
 
 // ═══════════════════════════════════════════════════════
 //  API
@@ -576,9 +637,12 @@ function setPivotTF(btn){
   renderDestek(sorted(filtered()));
 }
 function getPivot(s){
-  if(pivotTF==="D") return {s1:s.s1_d,s2:s.s2_d,r1:s.r1_d,r2:s.r2_d,mid:s.pivot_mid_d};
-  if(pivotTF==="W") return {s1:s.s1_w,s2:s.s2_w,r1:s.r1_w,r2:s.r2_w,mid:s.pivot_mid_w};
-  return {s1:s.s1,s2:s.s2,r1:s.r1,r2:s.r2,mid:s.pivot_mid};
+  if(pivotTF==="4H") return {s1:s.s1_4h, s2:s.s2_4h, r1:s.r1_4h, r2:s.r2_4h, mid:s.pivot_mid_4h};
+  if(pivotTF==="D")  return {s1:s.s1_d,  s2:s.s2_d,  r1:s.r1_d,  r2:s.r2_d,  mid:s.pivot_mid_d};
+  if(pivotTF==="W")  return {s1:s.s1_w,  s2:s.s2_w,  r1:s.r1_w,  r2:s.r2_w,  mid:s.pivot_mid_w};
+  if(pivotTF==="M")  return {s1:s.s1_m,  s2:s.s2_m,  r1:s.r1_m,  r2:s.r2_m,  mid:s.pivot_mid_m};
+  if(pivotTF==="6M") return {s1:s.s1_6m, s2:s.s2_6m, r1:s.r1_6m, r2:s.r2_6m, mid:s.pivot_mid_6m};
+  return {s1:s.s1, s2:s.s2, r1:s.r1, r2:s.r2, mid:s.pivot_mid};
 }
 function setHacimView(btn){
   document.querySelectorAll(".hacim-bar .tf-btn").forEach(b=>b.classList.remove("active"));
@@ -601,6 +665,7 @@ function openChart(ticker,name){
   document.querySelectorAll(".modal-tf-btn").forEach(b=>b.classList.remove("active"));
   document.querySelector(".modal-tf-btn[data-tf='D']").classList.add("active");
   chartTF="D"; loadTV(); document.body.style.overflow="hidden";
+  updateModalFavBtn();  // Favori durumunu güncelle
   fetch("/api/news/"+sym).then(r=>r.json()).then(d=>{
     const cls=d.sentiment==="iyi"?"news-iyi":d.sentiment==="kotu"?"news-kotu":"news-notr";
     nb.textContent="📰 "+(d.badge||"—"); nb.className="news-badge "+cls;
@@ -672,6 +737,7 @@ function getF(){
     temettu:    document.getElementById("f-temettu").checked,
     xktum:      document.getElementById("f-xktum").checked,
     ideal:      document.getElementById("f-ideal").checked,
+    favori:     document.getElementById("f-favori").checked,
   };
 }
 function isIdeal(s){
@@ -718,6 +784,8 @@ function filtered(){
     if(f.temettu&&!(s.temettu!=null&&s.temettu>0))      return false;
     if(f.xktum&&!s.is_xktum)            return false;
     if(f.ideal&&!isIdeal(s))            return false;
+    if(f.favori&&!favorites.has(s.sembol)) return false;
+    if(favOnly&&!favorites.has(s.sembol))  return false;
     return true;
   });
 }
@@ -734,13 +802,14 @@ function resetFilters(){
    "f-bb-alt","f-bb-orta","f-bb-sikisma",
    "f-hacim-al","f-hacim-guclu-al",
    "f-destek-yakin","f-kara-gecti","f-ceyrek-karda","f-oversold",
-   "f-strong-buy","f-macd-bull","f-temettu","f-xktum","f-ideal"]
+   "f-strong-buy","f-macd-bull","f-temettu","f-xktum","f-ideal","f-favori"]
     .forEach(id=>{ document.getElementById(id).checked=false; });
-  activeSector="hepsi"; bist100Only=false; xktumOnly=false;
+  activeSector="hepsi"; bist100Only=false; xktumOnly=false; favOnly=false;
   document.querySelectorAll(".s-btn[data-sektor]").forEach(b=>b.classList.remove("active"));
   document.querySelector(".s-btn[data-sektor='hepsi']").classList.add("active");
   document.getElementById("bist100-btn").classList.remove("active");
   document.getElementById("xktum-btn").classList.remove("active");
+  document.getElementById("fav-btn").classList.remove("active");
   render();
 }
 
@@ -835,8 +904,10 @@ function render(){
 
 function renderGenel(data){
   document.getElementById("cnt-genel").textContent=data.length+" hisse";
-  document.getElementById("tbody-genel").innerHTML=data.map(s=>`
-    <tr>
+  document.getElementById("tbody-genel").innerHTML=data.map(s=>{
+    const isFav = favorites.has(s.sembol);
+    return `
+    <tr class="${isFav?'is-fav':''}">
       <td class="ticker" onclick="openChart('${s.sembol}','${esc(s.ad)}')">${s.sembol.replace(".IS","")}</td>
       <td class="nm" title="${s.ad||""}">${s.ad||""}</td>
       <td>${fmt(s.fiyat,2)}</td>
@@ -844,11 +915,13 @@ function renderGenel(data){
       <td>${fmt(s.fk,2)}</td>
       <td>${fmt(s.pd_dd,2)}</td>
       <td>${fmtNum(s.piyasa_degeri)}</td>
-      <td>${s.temettu!=null?`<span class="mono pos">${s.temettu.toFixed(2)}%</span>`:NA}</td>
+      <td>${s.temettu!=null&&s.temettu>0?`<span class="mono pos">${s.temettu.toFixed(2)}%</span>`:NA}</td>
       <td>${fmtPct(s.perf_1y)}</td>
       <td>${s.signal?fmtBadge(s.signal):NA}${isIdeal(s)?'<span class="badge ideal" style="margin-left:3px">⭐</span>':''}</td>
       <td>${fmtBadges(s)}</td>
-    </tr>`).join("");
+      <td><button class="fav-star ${isFav?'active':''}" onclick="toggleFav('${s.sembol}')" title="${isFav?'Favorilerden çıkar':'Favorilere ekle'}">${isFav?'★':'☆'}</button></td>
+    </tr>`;
+  }).join("");
 }
 
 function renderTemel(data){
