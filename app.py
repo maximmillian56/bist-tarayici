@@ -328,7 +328,7 @@ def _hacim_sinyal(volume, avg_7d, avg_30d):
     ratio = volume / ref
     if ratio >= 2.0:
         return {"label": f"Güçlü Al ({ratio:.1f}x)", "cls": "strong-buy", "icon": "🚀"}
-    if ratio >= 1.5:
+    if ratio >= 1.25:
         return {"label": f"Al ({ratio:.1f}x)", "cls": "buy", "icon": "📈"}
     if ratio >= 0.8:
         return {"label": "Normal", "cls": "neutral", "icon": "📊"}
