@@ -5,7 +5,7 @@ Direkt TradingView Scanner API (tradingview_screener kütüphanesi yok)
 import os, threading, time
 from datetime import datetime
 import requests
-from flask import Flask, jsonify, send_file
+from flask import Flask, jsonify, send_file, request
 
 PORT     = int(os.environ.get("PORT", 5000))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -849,6 +849,133 @@ def api_news(ticker):
         "news":      placeholder_news,
         "kaynak":    "placeholder — KAP entegrasyonu yapılacak",
     })
+
+# ==============================================================================
+#  YAPAY ZEKA CHAT ENDPOİNTİ
+# ==============================================================================
+
+GEMINI_API_KEY = "AIzaSyBGMU28L2lS3r6ydJSLKIwGSIKaoHREOm0"
+
+def _build_stock_context(ticker=None):
+    """Hisse verilerinden AI için bağlam metni oluşturur."""
+    with _lock:
+        stocks = _cache.get("stocks") or []
+
+    if not stocks:
+        return "Henüz hisse verisi yüklenmedi."
+
+    lines = []
+
+    # Belirli bir hisse sorulduysa detaylı bilgi ver
+    if ticker:
+        ticker_upper = ticker.upper().replace(".IS", "")
+        match = next((s for s in stocks if s["sembol"].replace(".IS","").upper() == ticker_upper), None)
+        if match:
+            s = match
+            lines.append(f"=== {ticker_upper} DETAYLI VERİ ===")
+            lines.append(f"Şirket: {s.get('ad','—')}")
+            lines.append(f"Fiyat: {s.get('fiyat','—')} TL")
+            lines.append(f"Günlük Değişim: %{s.get('degisim','—')}")
+            lines.append(f"F/K: {s.get('fk','—')}, PD/DD: {s.get('pd_dd','—')}, P/S: {s.get('ps','—')}")
+            lines.append(f"Piyasa Değeri: {s.get('piyasa_degeri','—')} TL")
+            lines.append(f"Net Kar (TTM): {s.get('net_kar','—')} TL")
+            lines.append(f"Net Kar (Son Çeyrek): {s.get('net_kar_fq','—')} TL")
+            lines.append(f"Net Kar Marjı: %{s.get('net_kar_marj','—')}")
+            lines.append(f"FAVÖK: {s.get('favok','—')} TL")
+            lines.append(f"EV/FAVÖK: {s.get('ev_favok','—')}")
+            lines.append(f"FAVÖK/Gelir (EBITDA Marjı): %{round(s['favok_oz_kaynak']*100,1) if s.get('favok_oz_kaynak') else '—'}")
+            lines.append(f"Brüt Kar Marjı: %{s.get('brut_kar_marji','—')}")
+            lines.append(f"Temettü Verimi: %{s.get('temettu','—')}")
+            lines.append(f"Sektör: {s.get('sektor','—')}")
+            # Performans
+            lines.append(f"Performans 1A: %{s.get('perf_1m','—')}, 6A: %{s.get('perf_6m','—')}, 1Y: %{s.get('perf_1y','—')}")
+            # Teknik
+            lines.append(f"RSI: {s.get('rsi','—')} → {s['rsi_signal']['label'] if s.get('rsi_signal') else '—'}")
+            lines.append(f"MACD Boğa mı: {s.get('macd_bullish','—')}")
+            lines.append(f"TradingView Sinyali: {s['signal']['label'] if s.get('signal') else '—'} ({s.get('recommend','—')})")
+            # EMA
+            ema_durum = []
+            for e in [20,25,50,100,200]:
+                val = s.get(f"ema{e}_ustu")
+                if val is not None:
+                    ema_durum.append(f"EMA{e}:{'↑' if val else '↓'}")
+            lines.append(f"EMA Durumu: {', '.join(ema_durum) if ema_durum else '—'}")
+            # Bollinger
+            lines.append(f"Bollinger Pozisyon: %{s.get('bb_pozisyon','—')}, Genişlik: %{s.get('bb_genislik','—')}")
+            lines.append(f"Beta: {s.get('beta','—')}")
+            # Destek/Direnç
+            lines.append(f"Pivot Günlük — Destek1: {s.get('s1_d','—')}, Pivot: {s.get('pivot_mid_d','—')}, Direnç1: {s.get('r1_d','—')}")
+            lines.append(f"Pivot Haftalık — Destek1: {s.get('s1_w','—')}, Pivot: {s.get('pivot_mid_w','—')}, Direnç1: {s.get('r1_w','—')}")
+            lines.append(f"Pivot Aylık — Destek1: {s.get('s1_m','—')}, Direnç1: {s.get('r1_m','—')}")
+            lines.append(f"Pivot 6 Aylık — Destek1: {s.get('s1_6m','—')}, Direnç1: {s.get('r1_6m','—')}")
+            lines.append(f"BIST100: {'Evet' if s.get('is_bist100') else 'Hayır'}, XKTUM: {'Evet' if s.get('is_xktum') else 'Hayır'}")
+            lines.append(f"Son Çeyrekte Kâr mı: {'Evet' if s.get('ceyrek_karda') else 'Hayır'}")
+            lines.append(f"Kâra Geçti (TTM+): {'Evet' if s.get('kara_gecti') else 'Hayır'}")
+            lines.append(f"Hacim Sinyali: {s['hacim_sinyal']['label'] if s.get('hacim_sinyal') else '—'}")
+        else:
+            lines.append(f"{ticker_upper} hissesi veri tabanında bulunamadı.")
+
+    # Genel piyasa özeti
+    total = len(stocks)
+    strong_buy = sum(1 for s in stocks if s.get("recommend",0) and s["recommend"] >= 0.5)
+    strong_sell = sum(1 for s in stocks if s.get("recommend",0) and s["recommend"] <= -0.5)
+    temettu = sum(1 for s in stocks if s.get("temettu") and s["temettu"] > 0)
+    ceyrek_k = sum(1 for s in stocks if s.get("ceyrek_karda"))
+    lines.append(f"\n=== GENEL PİYASA ÖZETİ ({total} hisse) ===")
+    lines.append(f"Güçlü Al Sinyali: {strong_buy} hisse")
+    lines.append(f"Güçlü Sat Sinyali: {strong_sell} hisse")
+    lines.append(f"Temettü Ödeyen: {temettu} hisse")
+    lines.append(f"Son Çeyrekte Kâr Eden: {ceyrek_k} hisse")
+
+    return "\n".join(lines)
+
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    """Gemini API ile BIST hisse soruları cevaplanır."""
+    try:
+        body = request.get_json(force=True)
+        user_msg = (body.get("message") or "").strip()
+        if not user_msg:
+            return jsonify({"error": "Mesaj boş"}), 400
+
+        # Mesajdan hisse sembolü bul (THYAO, GARAN vb.)
+        import re
+        words = re.findall(r'\b[A-ZÇĞİÖŞÜa-zçğışöüü]{3,5}\b', user_msg.upper())
+        with _lock:
+            stocks = _cache.get("stocks") or []
+        tickers_in_db = {s["sembol"].replace(".IS","") for s in stocks}
+        found_ticker = next((w for w in words if w in tickers_in_db), None)
+
+        # Bağlam oluştur
+        context = _build_stock_context(found_ticker)
+
+        # Sistem promptu — sadece bizim verilerimizle cevap ver
+        system_prompt = """Sen bir BIST (Borsa İstanbul) hisse analiz asistanısın.
+SADECE aşağıda sana verilen gerçek zamanlı hisse verilerini kullanarak cevap ver.
+Bu verilerin dışında tahmin, yorum veya dışarıdan bilgi EKLEME.
+Türkçe cevap ver. Kısa, net ve bilgilendirici ol.
+Yatırım tavsiyesi verme — sadece mevcut verileri açıkla.
+Eğer sana sorulan hisse veritabanında yoksa veya veri yetersizse bunu belirt."""
+
+        full_prompt = f"{system_prompt}\n\n--- GÜNCEL VERİLER ---\n{context}\n\n--- KULLANICI SORUSU ---\n{user_msg}"
+
+        # Gemini API çağrısı
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-3.6-flash")
+        response = model.generate_content(full_prompt)
+        answer = response.text
+
+        return jsonify({
+            "answer": answer,
+            "ticker": found_ticker,
+            "context_used": bool(found_ticker),
+        })
+
+    except Exception as e:
+        import traceback
+        print("Chat error:", traceback.format_exc(), flush=True)
+        return jsonify({"error": f"AI hatası: {str(e)}"}), 500
 
 # ==============================================================================
 #  BAŞLANGIÇ

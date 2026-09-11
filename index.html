@@ -197,6 +197,41 @@ tr.is-fav{background:rgba(245,158,11,.04)}
 /* ── TAM EKRAN ── */
 .btn-fullscreen{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;transition:all var(--tr);flex-shrink:0}
 .btn-fullscreen:hover{border-color:var(--primary);color:var(--text)}
+
+/* ── AI CHAT ── */
+.chat-fab{position:fixed;bottom:24px;right:24px;z-index:900;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--purple));border:none;color:#fff;font-size:22px;cursor:pointer;box-shadow:0 4px 20px rgba(59,130,246,.5);transition:transform .2s,box-shadow .2s;display:flex;align-items:center;justify-content:center}
+.chat-fab:hover{transform:scale(1.08);box-shadow:0 6px 28px rgba(59,130,246,.7)}
+.chat-panel{position:fixed;bottom:86px;right:24px;z-index:901;width:360px;height:520px;background:var(--bg2);border:1px solid var(--border2);border-radius:16px;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.6);transform:scale(0.92) translateY(20px);opacity:0;pointer-events:none;transition:all .25s cubic-bezier(.34,1.56,.64,1)}
+.chat-panel.open{transform:scale(1) translateY(0);opacity:1;pointer-events:all}
+.chat-hdr{display:flex;align-items:center;gap:9px;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.chat-hdr-icon{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--purple));display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+.chat-hdr-info{flex:1}
+.chat-hdr-title{font-size:13px;font-weight:700}
+.chat-hdr-sub{font-size:10px;color:var(--muted)}
+.chat-close{background:transparent;border:none;color:var(--muted);font-size:17px;cursor:pointer;padding:2px 5px;border-radius:4px}
+.chat-close:hover{color:var(--text);background:var(--border)}
+.chat-msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.chat-msg{max-width:88%;display:flex;flex-direction:column;gap:3px}
+.chat-msg.user{align-self:flex-end;align-items:flex-end}
+.chat-msg.ai{align-self:flex-start;align-items:flex-start}
+.chat-bubble{padding:9px 13px;border-radius:14px;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.chat-msg.user .chat-bubble{background:var(--primary);color:#fff;border-bottom-right-radius:4px}
+.chat-msg.ai .chat-bubble{background:var(--bg3);border:1px solid var(--border);color:var(--text);border-bottom-left-radius:4px}
+.chat-msg.ai.error .chat-bubble{border-color:var(--red);color:#fca5a5}
+.chat-time{font-size:10px;color:var(--muted)}
+.chat-ticker-badge{display:inline-block;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700;background:rgba(59,130,246,.2);color:var(--primary);border:1px solid rgba(59,130,246,.3);margin-bottom:3px}
+.chat-typing{display:flex;gap:4px;align-items:center;padding:9px 13px;background:var(--bg3);border:1px solid var(--border);border-radius:14px;border-bottom-left-radius:4px;width:fit-content}
+.chat-typing span{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:bounce .9s infinite}
+.chat-typing span:nth-child(2){animation-delay:.15s}
+.chat-typing span:nth-child(3){animation-delay:.3s}
+@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-7px)}}
+.chat-input-wrap{display:flex;gap:7px;padding:10px 12px;border-top:1px solid var(--border);flex-shrink:0}
+.chat-input{flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:8px 12px;font-size:12px;font-family:inherit;resize:none;height:38px;transition:border var(--tr);outline:none}
+.chat-input:focus{border-color:var(--primary)}
+.chat-send{width:36px;height:38px;border-radius:10px;background:var(--primary);border:none;color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background var(--tr);flex-shrink:0}
+.chat-send:hover{background:var(--primary2)}
+.chat-send:disabled{background:var(--border2);cursor:not-allowed}
+.chat-hint{font-size:10px;color:var(--muted);padding:0 14px 8px;text-align:center;flex-shrink:0}
 </style>
 </head>
 <body>
@@ -489,6 +524,31 @@ tr.is-fav{background:rgba(245,158,11,.04)}
       <button class="modal-tf-btn" data-tf="W"   onclick="setChartTF(this)">Haftalık</button>
     </div>
     <div class="modal-body"><div class="tv-wrap" id="tv-wrap"></div></div>
+  </div>
+</div>
+
+<!-- AI CHAT PANEL -->
+<button class="chat-fab" id="chat-fab" onclick="toggleChat()" title="AI Hisse Asistanı">🤖</button>
+
+<div class="chat-panel" id="chat-panel">
+  <div class="chat-hdr">
+    <div class="chat-hdr-icon">🤖</div>
+    <div class="chat-hdr-info">
+      <div class="chat-hdr-title">BIST AI Asistanı</div>
+      <div class="chat-hdr-sub">Gemini 2.0 · Sadece sayfadaki verilerle çalışır</div>
+    </div>
+    <button class="chat-close" onclick="toggleChat()">✕</button>
+  </div>
+  <div class="chat-msgs" id="chat-msgs">
+    <div class="chat-msg ai">
+      <div class="chat-bubble">👋 Merhaba! BIST hisseleri hakkında sorularınızı yanıtlıyorum.<br><br>Örnek sorular:<br>• <b>THYAO</b> hakkında ne düşünüyorsun?<br>• <b>GARAN</b> teknik durumu nasıl?<br>• Hangi hisseler güçlü al sinyali veriyor?<br>• Temettü ödeyen hisseler hangileri?</div>
+      <div class="chat-time">BIST AI</div>
+    </div>
+  </div>
+  <div class="chat-hint">Gerçek zamanlı verilerle analiz yapılır · Yatırım tavsiyesi değildir</div>
+  <div class="chat-input-wrap">
+    <input class="chat-input" id="chat-input" placeholder="Hisse sorun... (THYAO, GARAN...)" onkeydown="chatKeyDown(event)">
+    <button class="chat-send" id="chat-send" onclick="sendChat()">➤</button>
   </div>
 </div>
 
@@ -1059,7 +1119,97 @@ function switchTab(tab,btn){
 //  UTILS
 // ═══════════════════════════════════════════════════════
 function esc(s){ return (s||"").replace(/'/g,"&#39;").replace(/"/g,"&quot;"); }
-document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeChart(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ closeChart(); }});
+
+// ═══════════════════════════════════════════════════════
+//  AI CHAT
+// ═══════════════════════════════════════════════════════
+let chatOpen = false;
+let chatBusy = false;
+
+function toggleChat(){
+  chatOpen = !chatOpen;
+  document.getElementById("chat-panel").classList.toggle("open", chatOpen);
+  if(chatOpen) setTimeout(()=>document.getElementById("chat-input").focus(), 280);
+}
+
+function chatKeyDown(e){
+  if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); sendChat(); }
+}
+
+function chatNow(){ return new Date().toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"}); }
+
+function addChatMsg(role, text, ticker){
+  const msgs = document.getElementById("chat-msgs");
+  const wrap = document.createElement("div");
+  wrap.className = `chat-msg ${role}`;
+  let inner = "";
+  if(role==="ai" && ticker){
+    inner += `<span class="chat-ticker-badge">📊 ${ticker}</span>`;
+  }
+  inner += `<div class="chat-bubble">${text}</div>`;
+  inner += `<div class="chat-time">${chatNow()}</div>`;
+  wrap.innerHTML = inner;
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+  return wrap;
+}
+
+function addTyping(){
+  const msgs = document.getElementById("chat-msgs");
+  const div = document.createElement("div");
+  div.className = "chat-msg ai"; div.id = "chat-typing";
+  div.innerHTML = `<div class="chat-typing"><span></span><span></span><span></span></div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+function removeTyping(){
+  const t = document.getElementById("chat-typing");
+  if(t) t.remove();
+}
+
+async function sendChat(){
+  if(chatBusy) return;
+  const input = document.getElementById("chat-input");
+  const msg = input.value.trim();
+  if(!msg) return;
+
+  input.value = "";
+  chatBusy = true;
+  document.getElementById("chat-send").disabled = true;
+
+  addChatMsg("user", msg);
+  addTyping();
+
+  try{
+    const r = await fetch("/api/chat", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({message: msg})
+    });
+    const d = await r.json();
+    removeTyping();
+    if(d.error){
+      const wrap = addChatMsg("ai", "⚠️ " + d.error);
+      wrap.classList.add("error");
+    } else {
+      // Markdown-benzeri kalınlaştırma
+      const formatted = d.answer
+        .replace(/\*\*(.*?)\*\*/g,"<b>$1</b>")
+        .replace(/\*(.*?)\*/g,"<i>$1</i>")
+        .replace(/`(.*?)`/g,"<code style='background:var(--bg);padding:1px 4px;border-radius:3px'>$1</code>");
+      addChatMsg("ai", formatted, d.ticker);
+    }
+  }catch(e){
+    removeTyping();
+    const wrap = addChatMsg("ai", "⚠️ Bağlantı hatası. Sunucu çalışıyor mu?");
+    wrap.classList.add("error");
+  }finally{
+    chatBusy = false;
+    document.getElementById("chat-send").disabled = false;
+    document.getElementById("chat-input").focus();
+  }
+}
 
 // ═══════════════════════════════════════════════════════
 //  INIT
