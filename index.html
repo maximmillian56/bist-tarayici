@@ -81,8 +81,8 @@ input[type=range]{width:100%;accent-color:var(--primary);cursor:pointer}
 .sb-reset:hover{border-color:var(--red);color:var(--red)}
 
 /* ── TABLE ── */
-.table-wrap{overflow-x:auto;overflow-y:visible}
-table{width:100%;border-collapse:collapse;font-size:12px}
+.table-wrap{width:100%}
+table{width:100%;border-collapse:collapse;font-size:12px;min-width:max-content}
 thead th{background:var(--bg3);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.4px;padding:8px 10px;white-space:nowrap;border-bottom:2px solid var(--border);position:sticky;top:0;z-index:10;cursor:pointer;user-select:none}
 thead th:hover{color:var(--text)}
 thead th.sort-asc::after{content:" ↑"}thead th.sort-desc::after{content:" ↓"}
