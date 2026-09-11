@@ -7,6 +7,13 @@ from datetime import datetime
 import requests
 from flask import Flask, jsonify, send_file, request
 
+# .env dosyasından environment variable'ları yükle (lokal geliştirme için)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 PORT     = int(os.environ.get("PORT", 5000))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app      = Flask(__name__)
