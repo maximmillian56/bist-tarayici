@@ -854,7 +854,8 @@ def api_news(ticker):
 #  YAPAY ZEKA CHAT ENDPOİNTİ
 # ==============================================================================
 
-GEMINI_API_KEY = "AIzaSyBGMU28L2lS3r6ydJSLKIwGSIKaoHREOm0"
+# API anahtarı environment variable'dan okunur (güvenlik için hardcode etme!)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 def _build_stock_context(ticker=None):
     """Hisse verilerinden AI için bağlam metni oluşturur."""
@@ -932,6 +933,8 @@ def _build_stock_context(ticker=None):
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
     """Gemini API ile BIST hisse soruları cevaplanır."""
+    if not GEMINI_API_KEY:
+        return jsonify({"error": "GEMINI_API_KEY environment variable ayarlanmamış. Render > Environment kısmından ekleyin."}), 500
     try:
         body = request.get_json(force=True)
         user_msg = (body.get("message") or "").strip()
