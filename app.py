@@ -959,11 +959,18 @@ Eğer sana sorulan hisse veritabanında yoksa veya veri yetersizse bunu belirt."
 
         full_prompt = f"{system_prompt}\n\n--- GÜNCEL VERİLER ---\n{context}\n\n--- KULLANICI SORUSU ---\n{user_msg}"
 
-        # Gemini API çağrısı
-        import google.generativeai as genai
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-3.6-flash")
-        response = model.generate_content(full_prompt)
+        # Gemini API çağrısı (yeni SDK: google-genai)
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=full_prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.3,
+                max_output_tokens=1024,
+            )
+        )
         answer = response.text
 
         return jsonify({
