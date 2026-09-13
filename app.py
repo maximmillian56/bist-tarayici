@@ -16,6 +16,7 @@ except ImportError:
 
 PORT     = int(os.environ.get("PORT", 5000))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 app      = Flask(__name__)
 
 # ==============================================================================
@@ -1111,9 +1112,6 @@ Türkçe yaz. Yatırım tavsiyesi değil, veri analizi yap."""
 #  YAPAY ZEKA CHAT ENDPOİNTİ
 # ==============================================================================
 
-# API anahtarı environment variable'dan okunur (güvenlik için hardcode etme!)
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-
 def _build_stock_context(ticker=None):
     """Hisse verilerinden AI için bağlam metni oluşturur."""
     with _lock:
@@ -1189,37 +1187,64 @@ def _build_stock_context(ticker=None):
 
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
-    """Gemini API ile BIST hisse soruları cevaplanır."""
+    """Gemini AI chat — genel asistan + BIST verileri."""
     if not GEMINI_API_KEY:
-        return jsonify({"error": "GEMINI_API_KEY environment variable ayarlanmamış. Render > Environment kısmından ekleyin."}), 500
+        return jsonify({"error": "GEMINI_API_KEY environment variable ayarlanmamış."}), 500
     try:
         body = request.get_json(force=True)
         user_msg = (body.get("message") or "").strip()
         if not user_msg:
             return jsonify({"error": "Mesaj boş"}), 400
 
-        # Mesajdan hisse sembolü bul (THYAO, GARAN vb.)
+        # Mesajdan hisse sembollerini bul (birden fazla olabilir)
         import re
-        words = re.findall(r'\b[A-ZÇĞİÖŞÜa-zçğışöüü]{3,5}\b', user_msg.upper())
+        words = re.findall(r'\b[A-ZÇĞİÖŞÜa-zçğışöüü]{3,6}\b', user_msg.upper())
         with _lock:
             stocks = _cache.get("stocks") or []
         tickers_in_db = {s["sembol"].replace(".IS","") for s in stocks}
-        found_ticker = next((w for w in words if w in tickers_in_db), None)
+        found_tickers = [w for w in words if w in tickers_in_db]
+        # Tekrarları kaldır, sırayı koru
+        seen = set()
+        found_tickers = [t for t in found_tickers if not (t in seen or seen.add(t))]
 
-        # Bağlam oluştur
-        context = _build_stock_context(found_ticker)
+        # Bağlam oluştur — bulunan tüm hisseler için
+        context_parts = []
+        for t in found_tickers:
+            context_parts.append(_build_stock_context(t))
 
-        # Sistem promptu — sadece bizim verilerimizle cevap ver
-        system_prompt = """Sen bir BIST (Borsa İstanbul) hisse analiz asistanısın.
-SADECE aşağıda sana verilen gerçek zamanlı hisse verilerini kullanarak cevap ver.
-Bu verilerin dışında tahmin, yorum veya dışarıdan bilgi EKLEME.
-Türkçe cevap ver. Kısa, net ve bilgilendirici ol.
-Yatırım tavsiyesi verme — sadece mevcut verileri açıkla.
-Eğer sana sorulan hisse veritabanında yoksa veya veri yetersizse bunu belirt."""
+        # Hisse bulunamadıysa genel piyasa özeti ver
+        if not found_tickers:
+            context_parts.append(_build_stock_context(None))
+            # En çok işlem gören 10 hissenin özetini de ekle
+            top10 = sorted(stocks, key=lambda x: x.get("piyasa_degeri") or 0, reverse=True)[:10]
+            if top10:
+                context_parts.append("\n=== EN BÜYÜK 10 HİSSE ===")
+                for s in top10:
+                    sym = s["sembol"].replace(".IS","")
+                    sig = s["signal"]["label"] if s.get("signal") else "—"
+                    context_parts.append(f"{sym}: {s.get('fiyat')} TL, %{s.get('degisim')}, F/K:{s.get('fk')}, Sinyal:{sig}")
 
-        full_prompt = f"{system_prompt}\n\n--- GÜNCEL VERİLER ---\n{context}\n\n--- KULLANICI SORUSU ---\n{user_msg}"
+        context = "\n".join(context_parts)
 
-        # Gemini API çağrısı (yeni SDK: google-genai)
+        # Sistem promptu — tam kapsamlı AI asistan
+        system_prompt = """Sen akıllı bir yapay zeka asistanısın. Her konuda yardımcı olabilirsin.
+
+BIST (Borsa İstanbul) verileri ile donatılmışsın. Aşağıda sana güncel piyasa verileri verilmiştir.
+Kullanıcı bir hisse hakkında sorarsa bu verileri kullanarak detaylı analiz yap.
+Kullanıcı genel bir soru sorarsa (teknik analiz nedir, F/K oranı ne demek, ekonomi haberleri, yatırım stratejileri vb.) bilgin dahilinde özgürce cevap ver.
+
+Kurallar:
+- Türkçe cevap ver
+- Samimi ve yardımcı ol
+- Hisse verileri sorulduğunda aşağıdaki güncel verileri referans al
+- Genel finans, ekonomi, teknik analiz soruları sorulduğunda kendi bilginle cevap ver
+- Kullanıcı karşılaştırma isterse birden fazla hisseyi karşılaştır
+- "Bu yatırım tavsiyesi değildir" notunu ekle (sadece hisse analizi yapınca)
+- Kısa ve öz cevaplar ver, gereksiz uzatma"""
+
+        full_prompt = f"{system_prompt}\n\n--- GÜNCEL BIST VERİLERİ ---\n{context}\n\n--- KULLANICI ---\n{user_msg}"
+
+        # Gemini API çağrısı
         from google import genai
         from google.genai import types
         client = genai.Client(api_key=GEMINI_API_KEY)
@@ -1227,22 +1252,24 @@ Eğer sana sorulan hisse veritabanında yoksa veya veri yetersizse bunu belirt."
             model="gemini-3-flash-preview",
             contents=full_prompt,
             config=types.GenerateContentConfig(
-                temperature=0.3,
-                max_output_tokens=1024,
+                temperature=0.7,
+                max_output_tokens=4096,
             )
         )
         answer = response.text
 
         return jsonify({
             "answer": answer,
-            "ticker": found_ticker,
-            "context_used": bool(found_ticker),
+            "ticker": found_tickers[0] if found_tickers else None,
+            "tickers": found_tickers,
+            "context_used": bool(found_tickers),
         })
 
     except Exception as e:
         import traceback
         print("Chat error:", traceback.format_exc(), flush=True)
         return jsonify({"error": f"AI hatası: {str(e)}"}), 500
+
 
 # ==============================================================================
 #  BAŞLANGIÇ
