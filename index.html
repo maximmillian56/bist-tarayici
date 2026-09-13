@@ -248,6 +248,7 @@ tr.is-fav{background:rgba(245,158,11,.04)}
     <span class="search-icon">🔍</span>
     <input id="search" class="search-input" placeholder="Hisse ara... (GARAN, THY...)" oninput="render()">
   </div>
+  <button class="btn-primary" onclick="openChart('XU100.IS','BIST 100 Endeks')" style="background:linear-gradient(135deg,#10b981,#059669);margin-right:4px" title="BIST100 Endeks Grafiği">📈 BIST100</button>
   <button class="btn-primary" onclick="doRefresh()" id="refresh-btn">↺ Yenile</button>
   <span class="last-update" id="last-update">—</span>
 </header>
@@ -289,6 +290,7 @@ tr.is-fav{background:rgba(245,158,11,.04)}
   <button class="tab-btn"        onclick="switchTab('teknik',this)">📈 Teknik Analiz</button>
   <button class="tab-btn"        onclick="switchTab('gostergeler',this)">📉 Göstergeler</button>
   <button class="tab-btn"        onclick="switchTab('destek',this)">🎯 Destek/Direnç</button>
+  <button class="tab-btn"        onclick="switchTab('formasyon',this)">🔍 Formasyonlar</button>
   <button class="tab-btn"        onclick="switchTab('mevsim',this)">🌿 Mevsimsel</button>
 </div>
 
@@ -476,11 +478,11 @@ tr.is-fav{background:rgba(245,158,11,.04)}
     <div class="sec-hdr"><h3>🎯 Destek / Direnç (Klasik Pivot)</h3><span class="cnt" id="cnt-destek"></span></div>
     <div class="tf-bar">
       <span class="tf-lbl">Pivot Zaman:</span>
+      <button class="tf-btn" data-tf="1H" onclick="setPivotTF(this)">Saatlik</button>
       <button class="tf-btn" data-tf="4H" onclick="setPivotTF(this)">4 Saatlik</button>
       <button class="tf-btn" data-tf="D"  onclick="setPivotTF(this)">Günlük</button>
       <button class="tf-btn active" data-tf="W" onclick="setPivotTF(this)">Haftalık</button>
       <button class="tf-btn" data-tf="M"  onclick="setPivotTF(this)">Aylık</button>
-      <button class="tf-btn" data-tf="6M" onclick="setPivotTF(this)">6 Aylık</button>
     </div>
     <div class="table-wrap"><table>
       <thead><tr>
@@ -494,6 +496,22 @@ tr.is-fav{background:rgba(245,158,11,.04)}
       </tr></thead>
       <tbody id="tbody-destek"></tbody>
     </table></div>
+  </div>
+
+  <!-- FORMASYONLAR -->
+  <div class="tab-panel" id="panel-formasyon">
+    <div class="sec-hdr">
+      <h3>🔍 Yükseliş Formasyonları (1H / 4H / Günlük)</h3>
+      <span class="cnt" id="cnt-formasyon"></span>
+      <button class="btn-primary" onclick="fetchFormations()" style="margin-left:auto;font-size:11px">🔄 Tara</button>
+      <button class="btn-primary" onclick="fetchDailyReport()" style="background:linear-gradient(135deg,var(--primary),var(--purple));font-size:11px;margin-left:6px">📋 Günlük Rapor</button>
+    </div>
+    <div id="formasyon-content">
+      <div style="text-align:center;padding:40px;color:var(--muted)">
+        <p style="font-size:14px">🔍 Formasyonları taramak için <b>"🔄 Tara"</b> butonuna tıklayın</p>
+        <p style="font-size:11px;margin-top:8px">BIST100 hisseleri 1 saatlik, 4 saatlik ve günlük grafiklerde analiz edilir (~1-2 dk)</p>
+      </div>
+    </div>
   </div>
 
   <!-- MEVSİMSEL -->
@@ -692,16 +710,16 @@ function toggleXktum(){
 //  PIVOT TF / HACIM VIEW
 // ═══════════════════════════════════════════════════════
 function setPivotTF(btn){
-  document.querySelectorAll(".tf-btn").forEach(b=>b.classList.remove("active"));
+  document.querySelectorAll("#panel-destek .tf-btn").forEach(b=>b.classList.remove("active"));
   btn.classList.add("active"); pivotTF=btn.dataset.tf;
   renderDestek(sorted(filtered()));
 }
 function getPivot(s){
+  if(pivotTF==="1H") return {s1:s.s1_1h, s2:s.s2_1h, r1:s.r1_1h, r2:s.r2_1h, mid:s.pivot_mid_1h};
   if(pivotTF==="4H") return {s1:s.s1_4h, s2:s.s2_4h, r1:s.r1_4h, r2:s.r2_4h, mid:s.pivot_mid_4h};
   if(pivotTF==="D")  return {s1:s.s1_d,  s2:s.s2_d,  r1:s.r1_d,  r2:s.r2_d,  mid:s.pivot_mid_d};
   if(pivotTF==="W")  return {s1:s.s1_w,  s2:s.s2_w,  r1:s.r1_w,  r2:s.r2_w,  mid:s.pivot_mid_w};
   if(pivotTF==="M")  return {s1:s.s1_m,  s2:s.s2_m,  r1:s.r1_m,  r2:s.r2_m,  mid:s.pivot_mid_m};
-  if(pivotTF==="6M") return {s1:s.s1_6m, s2:s.s2_6m, r1:s.r1_6m, r2:s.r2_6m, mid:s.pivot_mid_6m};
   return {s1:s.s1, s2:s.s2, r1:s.r1, r2:s.r2, mid:s.pivot_mid};
 }
 function setHacimView(btn){
@@ -747,11 +765,37 @@ function loadTV(){
   wrap.innerHTML="";
   const sym=chartSymbol.replace(".IS","");
 
-  // Her seferinde iframe embed kullan — sembol sorunu olmaz
-  const iframe=document.createElement("iframe");
-  iframe.style.cssText="width:100%;height:500px;border:none";
-  iframe.src=`https://s.tradingview.com/widgetembed/?frameElementId=tv-embed&symbol=BIST%3A${sym}&interval=${chartTF}&hidesidetoolbar=0&symboledit=1&saveimage=0&toolbarbg=0d1220&theme=dark&timezone=Europe%2FIstanbul&style=1&locale=tr`;
-  wrap.appendChild(iframe);
+  // TradingView Advanced Chart Widget — her zaman doğru sembolü gösterir
+  const containerId = "tv_chart_"+Date.now();
+  const div = document.createElement("div");
+  div.id = containerId;
+  div.style.cssText = "width:100%;height:500px";
+  wrap.appendChild(div);
+
+  const script = document.createElement("script");
+  script.type = "text/javascript";
+  script.src = "https://s3.tradingview.com/tv.js";
+  script.onload = function(){
+    if(typeof TradingView !== "undefined"){
+      new TradingView.widget({
+        "autosize": true,
+        "symbol": "BIST:"+sym,
+        "interval": chartTF,
+        "timezone": "Europe/Istanbul",
+        "theme": "dark",
+        "style": "1",
+        "locale": "tr",
+        "toolbar_bg": "#0d1220",
+        "enable_publishing": false,
+        "allow_symbol_change": true,
+        "container_id": containerId,
+        "hide_side_toolbar": false,
+      });
+    }
+  };
+  // Temizle önceki script'leri
+  document.querySelectorAll('script[src*="s3.tradingview.com/tv.js"]').forEach(s=>s.remove());
+  document.head.appendChild(script);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1210,6 +1254,108 @@ async function sendChat(){
     document.getElementById("chat-input").focus();
   }
 }
+
+// ═══════════════════════════════════════════════════════
+//  FORMASYON TARAMA
+// ═══════════════════════════════════════════════════════
+let formasyonData = null;
+
+async function fetchFormations(){
+  const el = document.getElementById("formasyon-content");
+  el.innerHTML = `<div class="loading-wrap"><div class="spinner"></div><div class="loading-txt">BIST100 formasyonları taranıyor (~1-2 dk)...</div></div>`;
+  document.getElementById("cnt-formasyon").textContent = "taranıyor...";
+
+  try {
+    const r = await fetch("/api/formations");
+    const d = await r.json();
+    if(d.error){ el.innerHTML = `<p style="color:var(--red);padding:20px">${d.error}</p>`; return; }
+    formasyonData = d.data;
+    document.getElementById("cnt-formasyon").textContent = d.toplam + " hisse";
+    renderFormations(d.data);
+  } catch(e) {
+    el.innerHTML = `<p style="color:var(--red);padding:20px">Hata: ${e.message}</p>`;
+  }
+}
+
+function renderFormations(data){
+  const el = document.getElementById("formasyon-content");
+  if(!data || data.length === 0){
+    el.innerHTML = `<p style="text-align:center;padding:30px;color:var(--muted)">Yükseliş formasyonu bulunamadı</p>`;
+    return;
+  }
+
+  const tfLabels = {"1h":"⏰ 1H","4h":"⏰ 4H","1d":"📅 Günlük"};
+  let html = `<div class="table-wrap"><table><thead><tr>
+    <th>Sembol</th><th>Fiyat</th><th>Değişim</th><th>Formasyon</th><th>Zaman</th><th>Hedef</th><th>Kâr %</th>
+  </tr></thead><tbody>`;
+
+  for(const s of data){
+    for(const f of s.formasyonlar){
+      const karCls = f.kar_orani > 3 ? "up" : f.kar_orani > 1 ? "" : "muted";
+      html += `<tr>
+        <td class="ticker" onclick="openChart('${s.sembol}.IS','${esc(s.ad)}')">${s.sembol}</td>
+        <td>${s.fiyat||"—"}</td>
+        <td class="${(s.degisim||0)>=0?'up':'down'}">${s.degisim||0}%</td>
+        <td>${f.emoji} ${f.tip}</td>
+        <td>${tfLabels[f.zaman_dilimi]||f.zaman_dilimi}</td>
+        <td style="color:var(--green)">${f.hedef} ₺</td>
+        <td class="${karCls}" style="font-weight:700">${f.kar_orani>0?"+":""}${f.kar_orani}%</td>
+      </tr>`;
+    }
+  }
+  html += `</tbody></table></div>`;
+  el.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════
+//  GÜNLÜK AI RAPOR
+// ═══════════════════════════════════════════════════════
+async function fetchDailyReport(){
+  const favArr = [...favorites].map(f=>f.replace(".IS",""));
+  if(favArr.length === 0){
+    alert("Önce favori hisse ekleyin! ⭐");
+    return;
+  }
+
+  // Chat panelini aç ve rapor isteğini göster
+  if(!chatOpen) toggleChat();
+  addChatMsg("user", "📋 Günlük favori raporu oluştur");
+  addTyping();
+
+  try {
+    const r = await fetch("/api/daily-report", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({favorites: favArr})
+    });
+    const d = await r.json();
+    removeTyping();
+
+    if(d.error){
+      addChatMsg("ai", "⚠️ " + d.error);
+    } else {
+      const formatted = d.report
+        .replace(/\*\*(.*?)\*\*/g,"<b>$1</b>")
+        .replace(/\*(.*?)\*/g,"<i>$1</i>")
+        .replace(/`(.*?)`/g,"<code style='background:var(--bg);padding:1px 4px;border-radius:3px'>$1</code>");
+      addChatMsg("ai", `📋 <b>Günlük Favori Raporu</b> (${d.hisse_sayisi} hisse)\n\n${formatted}`);
+    }
+  } catch(e) {
+    removeTyping();
+    addChatMsg("ai", "⚠️ Rapor hatası: " + e.message);
+  }
+}
+
+// 09:00 otomatik rapor (sayfa açıkken)
+let dailyReportSent = false;
+setInterval(()=>{
+  const now = new Date();
+  if(now.getHours() === 9 && now.getMinutes() === 0 && !dailyReportSent && favorites.size > 0){
+    dailyReportSent = true;
+    fetchDailyReport();
+  }
+  if(now.getHours() !== 9) dailyReportSent = false;
+}, 30000);
 
 // ═══════════════════════════════════════════════════════
 //  INIT

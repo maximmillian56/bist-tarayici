@@ -73,8 +73,8 @@ SCAN_COLUMNS = [
     "open|1W", "high|1W", "low|1W",
     # Aylık OHLC (aylık pivot)
     "High.1M", "Low.1M",
-    # 6 Aylık OHLC (6 aylık pivot)
-    "High.6M", "Low.6M",
+    # 1 Saatlik OHLC (1H pivot)
+    "open|60", "high|60", "low|60",
     # Aylık pivot (TradingView destekler)
     "Pivot.M.Classic.S1", "Pivot.M.Classic.S2",
     "Pivot.M.Classic.R1", "Pivot.M.Classic.R2",
@@ -430,9 +430,9 @@ def _fetch():
                 m_h = _sf(gc("High.1M")); m_l = _sf(gc("Low.1M"))
                 mid_w, s1_w, s2_w, r1_w, r2_w = _pivot(m_h, m_l, d_c)
 
-                # ── 6 Aylık Pivot ──
-                s6_h = _sf(gc("High.6M")); s6_l = _sf(gc("Low.6M"))
-                mid_6m, s1_6m, s2_6m, r1_6m, r2_6m = _pivot(s6_h, s6_l, d_c)
+                # ── 1 Saatlik Pivot ──
+                h1_h = _sf(gc("high|60")); h1_l = _sf(gc("low|60")); h1_c = _sf(gc("close|60")) or fiyat
+                mid_1h, s1_1h, s2_1h, r1_1h, r2_1h = _pivot(h1_h, h1_l, h1_c)
 
                 # Destek yakınlığı (aylık S1'e göre)
                 destek_uzaklik = None
@@ -611,8 +611,8 @@ def _fetch():
                     "s1_w": s1_weekly, "s2_w": s2_weekly, "r1_w": r1_weekly, "r2_w": r2_weekly, "pivot_mid_w": mid_weekly,
                     # Pivot — Aylık OHLC bazlı
                     "s1_m": s1_w, "s2_m": s2_w, "r1_m": r1_w, "r2_m": r2_w, "pivot_mid_m": mid_w,
-                    # Pivot — 6 Aylık
-                    "s1_6m": s1_6m, "s2_6m": s2_6m, "r1_6m": r1_6m, "r2_6m": r2_6m, "pivot_mid_6m": mid_6m,
+                    # Pivot — 1 Saatlik
+                    "s1_1h": s1_1h, "s2_1h": s2_1h, "r1_1h": r1_1h, "r2_1h": r2_1h, "pivot_mid_1h": mid_1h,
                     "destek_uzaklik": destek_uzaklik,
                     "direnc_getiri":  direnc_getiri,
                     "destek_yakin":   destek_yakin,
@@ -858,6 +858,256 @@ def api_news(ticker):
     })
 
 # ==============================================================================
+#  FORMASYON TESPİT ENDPOİNTİ
+# ==============================================================================
+
+def _detect_formations(candles):
+    """OHLC mum listesinden yükseliş formasyonlarını tespit eder.
+    candles: list of dict [{o,h,l,c}, ...] (en yeniden en eskiye veya tersi)
+    Son 20 mum analiz edilir.
+    """
+    if not candles or len(candles) < 3:
+        return []
+
+    formations = []
+    n = len(candles)
+
+    for i in range(2, min(n, 20)):
+        c = candles[i]       # mevcut mum
+        p = candles[i-1]     # önceki mum
+        pp = candles[i-2]    # 2 önceki mum
+
+        body = abs(c["c"] - c["o"])
+        total_range = c["h"] - c["l"]
+        if total_range == 0:
+            continue
+
+        lower_shadow = min(c["o"], c["c"]) - c["l"]
+        upper_shadow = c["h"] - max(c["o"], c["c"])
+        bullish = c["c"] > c["o"]  # yeşil mum mu
+
+        # 1. Çekiç (Hammer) — küçük gövde, uzun alt gölge
+        if lower_shadow > body * 2 and upper_shadow < body * 0.3 and total_range > 0:
+            if i >= 3 and candles[i-1]["c"] < candles[i-3]["c"]:  # düşüş sonrası
+                target = c["c"] + body * 2
+                formations.append({
+                    "tip": "Çekiç (Hammer)",
+                    "emoji": "🔨",
+                    "idx": i,
+                    "hedef": round(target, 2),
+                    "kar_orani": round((target - c["c"]) / c["c"] * 100, 2) if c["c"] > 0 else 0,
+                })
+
+        # 2. Yutan Boğa (Bullish Engulfing) — yeşil mum önceki kırmızıyı yutar
+        p_body = abs(p["c"] - p["o"])
+        if bullish and p["c"] < p["o"]:  # mevcut yeşil, önceki kırmızı
+            if c["o"] <= p["c"] and c["c"] >= p["o"] and body > p_body:
+                target = c["c"] + body
+                formations.append({
+                    "tip": "Yutan Boğa (Engulfing)",
+                    "emoji": "📈",
+                    "idx": i,
+                    "hedef": round(target, 2),
+                    "kar_orani": round((target - c["c"]) / c["c"] * 100, 2) if c["c"] > 0 else 0,
+                })
+
+        # 3. Sabah Yıldızı (Morning Star) — 3 mumlu formasyon
+        pp_bearish = pp["c"] < pp["o"]
+        p_small = abs(p["c"] - p["o"]) < abs(pp["c"] - pp["o"]) * 0.3
+        if pp_bearish and p_small and bullish and c["c"] > (pp["o"] + pp["c"]) / 2:
+            target = c["c"] + abs(pp["o"] - pp["c"])
+            formations.append({
+                "tip": "Sabah Yıldızı (Morning Star)",
+                "emoji": "🌅",
+                "idx": i,
+                "hedef": round(target, 2),
+                "kar_orani": round((target - c["c"]) / c["c"] * 100, 2) if c["c"] > 0 else 0,
+            })
+
+        # 4. Delici Çizgi (Piercing Line) — kırmızı sonrası yeşil, orta noktanın üstünde kapanış
+        if bullish and p["c"] < p["o"]:
+            p_mid = (p["o"] + p["c"]) / 2
+            if c["o"] < p["c"] and c["c"] > p_mid and c["c"] < p["o"]:
+                target = p["o"]
+                formations.append({
+                    "tip": "Delici Çizgi (Piercing)",
+                    "emoji": "🔄",
+                    "idx": i,
+                    "hedef": round(target, 2),
+                    "kar_orani": round((target - c["c"]) / c["c"] * 100, 2) if c["c"] > 0 else 0,
+                })
+
+        # 5. Üç Beyaz Asker (Three White Soldiers)
+        if i >= 3:
+            ppp = candles[i-3] if i >= 3 else None
+            if (pp["c"] > pp["o"] and p["c"] > p["o"] and c["c"] > c["o"]
+                and p["c"] > pp["c"] and c["c"] > p["c"]
+                and p["o"] > pp["o"] and c["o"] > p["o"]):
+                target = c["c"] + (c["c"] - pp["o"]) * 0.5
+                formations.append({
+                    "tip": "Üç Beyaz Asker",
+                    "emoji": "⚔️",
+                    "idx": i,
+                    "hedef": round(target, 2),
+                    "kar_orani": round((target - c["c"]) / c["c"] * 100, 2) if c["c"] > 0 else 0,
+                })
+
+    return formations
+
+@app.route("/api/formations")
+def api_formations():
+    """Tüm hisselerin formasyon analizini döner — cache'deki veriden hesaplanır."""
+    import yfinance as yf
+
+    with _lock:
+        stocks = _cache.get("stocks") or []
+
+    if not stocks:
+        return jsonify({"error": "Henüz hisse verisi yüklenmedi", "data": []})
+
+    # Sadece BIST100 veya en işlem gören 100 hisseyi tara (performans için)
+    bist_stocks = [s for s in stocks if s.get("is_bist100")]
+    if not bist_stocks:
+        bist_stocks = sorted(stocks, key=lambda x: x.get("piyasa_degeri") or 0, reverse=True)[:100]
+
+    results = []
+    timeframes = {"1h": "60m", "4h": "60m", "1d": "1d"}
+    periods = {"1h": "5d", "4h": "30d", "1d": "60d"}
+
+    for s in bist_stocks:
+        ticker = s["sembol"].replace(".IS", "") + ".IS"
+        try:
+            stk = yf.Ticker(ticker)
+            stock_formations = []
+
+            for tf_label, interval in timeframes.items():
+                try:
+                    hist = stk.history(period=periods[tf_label], interval=interval)
+                    if hist.empty or len(hist) < 5:
+                        continue
+
+                    candles = [{"o": row["Open"], "h": row["High"], "l": row["Low"], "c": row["Close"]}
+                               for _, row in hist.iterrows()]
+
+                    # 4H: 60dk verileri 4'erli grupla
+                    if tf_label == "4h":
+                        grouped = []
+                        for j in range(0, len(candles) - 3, 4):
+                            chunk = candles[j:j+4]
+                            grouped.append({
+                                "o": chunk[0]["o"],
+                                "h": max(x["h"] for x in chunk),
+                                "l": min(x["l"] for x in chunk),
+                                "c": chunk[-1]["c"],
+                            })
+                        candles = grouped
+
+                    fms = _detect_formations(candles)
+                    for f in fms:
+                        f["zaman_dilimi"] = tf_label
+                        f["fiyat"] = s.get("fiyat")
+                        stock_formations.append(f)
+                except Exception:
+                    continue
+
+            if stock_formations:
+                results.append({
+                    "sembol": s["sembol"].replace(".IS", ""),
+                    "ad": s.get("ad", ""),
+                    "fiyat": s.get("fiyat"),
+                    "degisim": s.get("degisim"),
+                    "formasyonlar": stock_formations,
+                })
+
+        except Exception:
+            continue
+
+    # Kar oranına göre sırala (en yüksek kâr potansiyeli üstte)
+    for r in results:
+        r["max_kar"] = max(f["kar_orani"] for f in r["formasyonlar"]) if r["formasyonlar"] else 0
+    results.sort(key=lambda x: x["max_kar"], reverse=True)
+
+    return jsonify({"data": results, "toplam": len(results)})
+
+
+# ==============================================================================
+#  GÜNLÜK AI RAPOR ENDPOİNTİ
+# ==============================================================================
+
+@app.route("/api/daily-report", methods=["POST"])
+def api_daily_report():
+    """Favorilerdeki hisselerin günlük AI raporunu oluşturur."""
+    if not GEMINI_API_KEY:
+        return jsonify({"error": "GEMINI_API_KEY ayarlanmamış"}), 500
+
+    try:
+        body = request.get_json(force=True)
+        fav_list = body.get("favorites", [])
+
+        if not fav_list:
+            return jsonify({"error": "Favori listesi boş"}), 400
+
+        with _lock:
+            stocks = _cache.get("stocks") or []
+
+        # Favorilerdeki hisselerin verilerini topla
+        fav_data = []
+        for s in stocks:
+            sym = s["sembol"].replace(".IS", "")
+            if sym in fav_list:
+                fav_data.append(s)
+
+        if not fav_data:
+            return jsonify({"error": "Favori hisseler bulunamadı"}), 404
+
+        # Her favori hisse için bağlam oluştur
+        lines = [f"=== GÜNLÜK FAVORİ RAPORU — {len(fav_data)} hisse ===\n"]
+        for s in fav_data:
+            sym = s["sembol"].replace(".IS", "")
+            lines.append(f"--- {sym} ({s.get('ad','')}) ---")
+            lines.append(f"Fiyat: {s.get('fiyat')} TL | Değişim: %{s.get('degisim')}")
+            lines.append(f"RSI: {s.get('rsi')} | MACD Boğa: {s.get('macd_bullish')}")
+            lines.append(f"TV Sinyal: {s['signal']['label'] if s.get('signal') else '—'}")
+            lines.append(f"F/K: {s.get('fk')} | Temettü: %{s.get('temettu')}")
+            lines.append(f"Destek(H): {s.get('s1_w')} | Direnç(H): {s.get('r1_w')}")
+            ema_info = []
+            for e in [20, 50, 200]:
+                val = s.get(f"ema{e}_ustu")
+                if val is not None:
+                    ema_info.append(f"EMA{e}:{'↑' if val else '↓'}")
+            lines.append(f"EMA: {', '.join(ema_info)}")
+            lines.append(f"Perf 1A: %{s.get('perf_1m')} | 6A: %{s.get('perf_6m')}\n")
+
+        context = "\n".join(lines)
+
+        system_prompt = """Sen bir BIST hisse analiz asistanısın.
+Aşağıdaki favorilerdeki hisselerin günlük raporunu hazırla.
+Her hisse için kısa bir değerlendirme yap (2-3 cümle).
+Sonunda genel bir özet ve dikkat edilmesi gerekenler yaz.
+SADECE verilen veriler ışığında yorum yap.
+Türkçe yaz. Yatırım tavsiyesi değil, veri analizi yap."""
+
+        full_prompt = f"{system_prompt}\n\n{context}"
+
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=full_prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.3,
+                max_output_tokens=2048,
+            )
+        )
+
+        return jsonify({"report": response.text, "hisse_sayisi": len(fav_data)})
+
+    except Exception as e:
+        import traceback
+        print("Daily report error:", traceback.format_exc(), flush=True)
+        return jsonify({"error": str(e)}), 500
+
 #  YAPAY ZEKA CHAT ENDPOİNTİ
 # ==============================================================================
 
