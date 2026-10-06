@@ -8,6 +8,8 @@ AI Demo Trading — yapay zekanın sanal bakiye ile otomatik alım-satım simül
 - Borsa saatlerinde (Pzt-Cum 10:00-18:00, TSİ) her 30 dakikada bir AI analiz eder.
 - Kullanıcı yalnızca izler ve başlangıç bakiyesini ayarlayabilir (ayarlayınca portföy sıfırlanır).
 """
+import copy
+import hmac
 import json
 import os
 import re
@@ -20,6 +22,8 @@ from flask import jsonify, request
 TZ_TR = timezone(timedelta(hours=3))        # Türkiye'de yaz/kış saati yok (UTC+3)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PORTFOLIO_FILE = os.path.join(BASE_DIR, "demo_portfolio.json")
+REDIS_KEY = "bist_demo_portfolio"
+_mem = {"p": None, "loaded": False}         # bellek önbelleği (depoyu her istekte okumamak için)
 
 DEFAULT_BALANCE = 1000.0
 MIN_BALANCE, MAX_BALANCE = 10.0, 1_000_000.0
@@ -72,7 +76,10 @@ def _usdtry():
         print("[demo] kur alinamadi:", exc, flush=True)
     if _fx["rate"]:
         return _fx["rate"]
-    p = _load()
+    try:
+        p = _load()
+    except Exception:
+        p = None
     return p.get("son_kur") if p else None
 
 
@@ -92,24 +99,65 @@ def _new_portfolio(balance):
     }
 
 
+def _upstash():
+    url = (os.environ.get("UPSTASH_REDIS_REST_URL") or "").rstrip("/")
+    token = os.environ.get("UPSTASH_REDIS_REST_TOKEN") or ""
+    return (url, token) if url and token else None
+
+
+def _remote(cmd):
+    """Upstash REST komutu çalıştırır. Hata olursa exception fırlatır."""
+    import requests
+    url, token = _upstash()
+    r = requests.post(url, json=cmd, headers={"Authorization": f"Bearer {token}"}, timeout=10)
+    r.raise_for_status()
+    data = r.json()
+    if "error" in data:
+        raise RuntimeError(data["error"])
+    return data.get("result")
+
+
+def is_cloud():
+    return bool(os.environ.get("RENDER") or os.environ.get("RENDER_EXTERNAL_URL"))
+
+
+def is_persistent():
+    return bool(_upstash()) or not is_cloud()
+
+
 def _load():
+    """Portföyün derin kopyasını döndürür (yoksa None). İlk çağrıda depodan okunur.
+    Uzak depo yapılandırılıp erişilemezse exception fırlatır (veri ezilmesin diye)."""
     with _dlock:
-        if not os.path.exists(PORTFOLIO_FILE):
-            return None
-        try:
-            with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as exc:
-            print("[demo] portfoy okunamadi:", exc, flush=True)
-            return None
+        if not _mem["loaded"]:
+            p = None
+            if _upstash():
+                raw = _remote(["GET", REDIS_KEY])
+                p = json.loads(raw) if raw else None
+            elif os.path.exists(PORTFOLIO_FILE):
+                try:
+                    with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
+                        p = json.load(f)
+                except Exception as exc:
+                    print("[demo] portfoy okunamadi:", exc, flush=True)
+            _mem["p"], _mem["loaded"] = p, True
+        return copy.deepcopy(_mem["p"])
 
 
 def _save(p):
     with _dlock:
-        tmp = PORTFOLIO_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(p, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, PORTFOLIO_FILE)
+        if _upstash():
+            _remote(["SET", REDIS_KEY, json.dumps(p, ensure_ascii=False)])   # başarısızsa bellek de güncellenmez
+        try:
+            tmp = PORTFOLIO_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(p, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, PORTFOLIO_FILE)
+        except Exception as exc:
+            if not _upstash():
+                raise
+            print("[demo] yerel yedek yazilamadi:", exc, flush=True)
+        _mem["p"], _mem["loaded"] = copy.deepcopy(p), True
 
 
 def _get_or_create():
@@ -438,12 +486,44 @@ def start_loop():
 # ──────────────────────────────────────────────────────────────────────────────
 #  ENDPOINTLER
 # ──────────────────────────────────────────────────────────────────────────────
+def _auth_error():
+    """Yönetim işlemleri (sıfırlama/manuel tetikleme) için yetki kontrolü.
+    DEMO_ADMIN_PASSWORD ayarlıysa şifre şart; bulutta ayarlı değilse işlem kapalıdır;
+    yerelde (şifre yoksa) serbesttir. Yetkiliyse None, değilse (response, kod) döner."""
+    pw = os.environ.get("DEMO_ADMIN_PASSWORD") or ""
+    if not pw:
+        if is_cloud():
+            return jsonify({"error": "Bu işlem kapalı: Render'da DEMO_ADMIN_PASSWORD ayarlanmamış."}), 403
+        return None
+    body = request.get_json(silent=True) or {}
+    given = request.headers.get("X-Demo-Password") or str(body.get("sifre") or "")
+    if hmac.compare_digest(given.encode("utf-8"), pw.encode("utf-8")):
+        return None
+    time.sleep(1)       # kaba kuvvet denemelerini yavaşlat
+    return jsonify({"error": "Şifre hatalı"}), 401
+
+
+def _safe(fn):
+    """Depo (Redis/dosya) hatalarında veriyi ezmek yerine 503 döndürür."""
+    from functools import wraps
+
+    @wraps(fn)
+    def wrapper(*a, **kw):
+        try:
+            return fn(*a, **kw)
+        except Exception as exc:
+            print("[demo] endpoint hatasi:", exc, flush=True)
+            return jsonify({"error": f"Demo deposuna erişilemedi: {exc}"}), 503
+    return wrapper
+
+
 def init(app, get_stocks, get_key):
     """Flask uygulamasına demo endpointlerini bağlar."""
     global _get_stocks, _get_key
     _get_stocks, _get_key = get_stocks, get_key
 
     @app.route("/api/demo/status")
+    @_safe
     def demo_status():
         with _dlock:
             p = _get_or_create()
@@ -473,9 +553,14 @@ def init(app, get_stocks, get_key):
                 "ai_aktif": bool(_get_key()),
                 "periyot_dk": CYCLE_MINUTES,
                 "komisyon": COMMISSION,
+                "kalici": is_persistent(),
+                "depolama": "upstash" if _upstash() else "dosya",
+                "sifre_gerekli": bool(os.environ.get("DEMO_ADMIN_PASSWORD")),
+                "yonetim_acik": bool(os.environ.get("DEMO_ADMIN_PASSWORD")) or not is_cloud(),
             })
 
     @app.route("/api/demo/history")
+    @_safe
     def demo_history():
         with _dlock:
             p = _get_or_create()
@@ -486,13 +571,17 @@ def init(app, get_stocks, get_key):
             })
 
     @app.route("/api/demo/reset", methods=["POST"])
+    @_safe
     def demo_reset():
+        denied = _auth_error()
+        if denied:
+            return denied
         body = request.get_json(silent=True) or {}
         try:
             bakiye = float(body.get("bakiye", DEFAULT_BALANCE))
         except (TypeError, ValueError):
             return jsonify({"error": "Geçersiz bakiye"}), 400
-        if not (MIN_BALANCE <= bakiye <= MAX_BALANCE):
+        if not (MIN_BALANCE <= bakiye <= MAX_BALANCE) or bakiye != bakiye:
             return jsonify({"error": f"Bakiye {MIN_BALANCE:.0f} - {MAX_BALANCE:,.0f} USD arasında olmalı"}), 400
         with _dlock:
             _save(_new_portfolio(bakiye))
@@ -500,7 +589,10 @@ def init(app, get_stocks, get_key):
 
     @app.route("/api/demo/run", methods=["POST"])
     def demo_run():
-        """Test amaçlı manuel tetikleme (arayüzde buton yok). 60 sn'de bir sınırlı."""
+        """Manuel tetikleme (arayüzde buton yok, şifre gerekir). 60 sn'de bir sınırlı."""
+        denied = _auth_error()
+        if denied:
+            return denied
         now = time.time()
         if now - _state.get("manual_ts", 0) < 60:
             return jsonify({"ok": False, "neden": "60 saniyede bir çalıştırılabilir"}), 429

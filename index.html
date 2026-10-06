@@ -1399,7 +1399,7 @@ setInterval(()=>{
 // ═══════════════════════════════════════════════════════
 //  AI DEMO TRADING
 // ═══════════════════════════════════════════════════════
-let demoTimer=null, demoLoading=false;
+let demoTimer=null, demoLoading=false, demoLast=null;
 function demoEsc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function demoUsd(v){ if(v==null||isNaN(v)) return "—"; return (v<0?"-":"")+"$"+Math.abs(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function demoPct(v){ if(v==null||isNaN(v)) return "—"; return (v>0?"+":"")+v.toFixed(2)+"%"; }
@@ -1425,6 +1425,8 @@ async function loadDemo(){
       fetch("/api/demo/status").then(r=>r.json()),
       fetch("/api/demo/history").then(r=>r.json())
     ]);
+    if(s.error||hi.error) throw new Error(s.error||hi.error);
+    demoLast=s;
     renderDemo(s,hi);
   }catch(e){
     document.getElementById("demo-content").innerHTML=`<p class="demo-err">Demo verisi alınamadı: ${demoEsc(e.message)}</p>`;
@@ -1512,6 +1514,7 @@ function renderDemo(s,hi){
     <div class="demo-note">🧠 <b>AI'ın son değerlendirmesi:</b> ${demoEsc(s.son_ozet)}
       <small>Son analiz: ${demoAgo(s.son_analiz)} • Toplam ${s.analiz_sayisi} analiz • Borsa açıkken her ${s.periyot_dk} dk • USD/TRY: ${s.kur||"—"}</small>
       ${s.son_hata?`<div class="demo-err">⚠️ Son hata: ${demoEsc(s.son_hata)}</div>`:""}
+      ${!s.kalici?`<div class="demo-err">⚠️ Kalıcı depolama yok: sunucu yeniden başlarsa portföy sıfırlanır. Render'a UPSTASH_REDIS_REST_URL ve UPSTASH_REDIS_REST_TOKEN ekle.</div>`:""}
     </div>
 
     <div class="demo-h4">📈 Portföy Değeri</div>
@@ -1533,13 +1536,22 @@ function renderDemo(s,hi){
 }
 
 async function demoSetBalance(){
+  if(demoLast && !demoLast.yonetim_acik){
+    alert("Bakiye ayarı kapalı: Render > Environment kısmına DEMO_ADMIN_PASSWORD ekle.");
+    return;
+  }
   const v=prompt("Yeni başlangıç bakiyesi (USD):\n\n⚠️ Portföy, pozisyonlar ve işlem geçmişi SIFIRLANIR ve AI bu bakiyeyle baştan başlar.","1000");
   if(v===null) return;
   const n=parseFloat(String(v).replace(",","."));
   if(!isFinite(n)){ alert("Geçerli bir sayı girin."); return; }
+  let sifre="";
+  if(demoLast && demoLast.sifre_gerekli){
+    sifre=prompt("Yönetici şifresi:");
+    if(sifre===null) return;
+  }
   if(!confirm(`Demo portföy ${demoUsd(n)} bakiye ile sıfırdan başlatılsın mı?`)) return;
   try{
-    const r=await fetch("/api/demo/reset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bakiye:n})});
+    const r=await fetch("/api/demo/reset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bakiye:n,sifre:sifre})});
     const d=await r.json();
     if(!r.ok){ alert(d.error||"Bakiye ayarlanamadı"); return; }
     loadDemo();
