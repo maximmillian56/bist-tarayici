@@ -1272,6 +1272,18 @@ Kurallar:
 
 
 # ==============================================================================
+#  AI DEMO TRADING
+# ==============================================================================
+import demo_trading
+
+def _demo_get_stocks():
+    with _lock:
+        return list(_cache.get("stocks") or [])
+
+demo_trading.init(app, _demo_get_stocks, lambda: GEMINI_API_KEY)
+
+
+# ==============================================================================
 #  BAŞLANGIÇ
 # ==============================================================================
 # NOT: Gunicorn için thread'ler gunicorn.conf.py'deki post_fork hook'ta baslatilir.
@@ -1287,4 +1299,5 @@ if __name__ == "__main__":
     # Lokal gelistirme: thread'leri buradan baslat
     threading.Thread(target=_fetch,          daemon=True).start()
     threading.Thread(target=_fetch_seasonal, daemon=True).start()
+    demo_trading.start_loop()
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)

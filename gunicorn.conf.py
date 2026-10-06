@@ -29,5 +29,6 @@ def post_fork(server, worker):
     # Thread'leri worker'ın kendi process'inde başlat
     threading.Thread(target=myapp._fetch,          daemon=True).start()
     threading.Thread(target=myapp._fetch_seasonal, daemon=True).start()
+    myapp.demo_trading.start_loop()
 
     server.log.info(f"Worker {worker.pid}: _fetch thread'leri baslatildi")

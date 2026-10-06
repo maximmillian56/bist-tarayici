@@ -28,3 +28,6 @@ Thumbs.db
 # Secrets / env
 .env
 .env.*
+
+demo_portfolio.json
+demo_portfolio.json.tmp

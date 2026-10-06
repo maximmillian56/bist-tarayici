@@ -150,6 +150,30 @@ td.nm{max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);
 .sec-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px 6px}
 .sec-hdr h3{font-size:13px;font-weight:600}
 .sec-hdr .cnt{font-size:11px;color:var(--muted)}
+.up{color:var(--green)}.down{color:var(--red)}.muted{color:var(--muted)}
+/* ── DEMO TRADING ── */
+.demo-wrap{padding:6px 14px 24px}
+.demo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:8px 0}
+.demo-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
+.demo-card .lbl{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.demo-card .val{font-size:22px;font-weight:700;margin-top:4px;font-family:'JetBrains Mono',monospace}
+.demo-card .sub{font-size:11px;color:var(--muted);margin-top:3px}
+.demo-card.hero{background:linear-gradient(135deg,#0f1b33,#1a1040);border-color:#2b3a67}
+.perf-tile .bar{height:4px;background:var(--border);border-radius:3px;margin-top:8px;overflow:hidden}
+.perf-tile .bar i{display:block;height:100%;background:var(--primary)}
+.demo-badge{display:inline-block;font-size:10.5px;padding:3px 9px;border-radius:99px;font-weight:600;margin-left:6px}
+.demo-badge.on{background:#10b98122;color:var(--green)}.demo-badge.off{background:#64748b22;color:var(--muted)}
+.demo-badge.busy{background:#f59e0b22;color:var(--yellow)}
+.demo-note{background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--purple);border-radius:10px;padding:10px 14px;font-size:12.5px;line-height:1.55;margin:10px 0}
+.demo-note small{color:var(--muted);display:block;margin-top:5px;font-size:10.5px}
+.demo-chart{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin:10px 0}
+.demo-chart svg{width:100%;height:190px;display:block}
+.demo-h4{font-size:12px;font-weight:600;margin:16px 0 6px;color:var(--text)}
+.demo-warn{font-size:10.5px;color:var(--muted);margin-top:14px;line-height:1.5}
+.demo-err{color:var(--red);font-size:11.5px;margin:6px 0}
+.trade-tag{font-size:10px;padding:2px 7px;border-radius:5px;font-weight:700}
+.trade-tag.al{background:#10b98122;color:var(--green)}.trade-tag.sat{background:#ef444422;color:var(--red)}
+.reason-cell{max-width:340px;font-size:11px;color:var(--muted);white-space:normal}
 
 /* ── HACIM BAR ── */
 .hacim-bar{display:flex;gap:5px;padding:8px 14px;background:var(--bg3);border-bottom:1px solid var(--border);align-items:center}
@@ -292,6 +316,7 @@ tr.is-fav{background:rgba(245,158,11,.04)}
   <button class="tab-btn"        onclick="switchTab('destek',this)">🎯 Destek/Direnç</button>
   <button class="tab-btn"        onclick="switchTab('formasyon',this)">🔍 Formasyonlar</button>
   <button class="tab-btn"        onclick="switchTab('mevsim',this)">🌿 Mevsimsel</button>
+  <button class="tab-btn"        onclick="switchTab('demo',this)">🤖 Demo</button>
 </div>
 
 <!-- MAIN -->
@@ -519,6 +544,17 @@ tr.is-fav{background:rgba(245,158,11,.04)}
     <div class="sec-hdr"><h3>🌿 Mevsimsel Analiz — Aylık Ort. Getiri (5 Yıl)</h3><span class="cnt" id="cnt-mevsim"></span></div>
     <div id="seasonal-content" class="seasonal-wrap">
       <div class="loading-wrap"><div class="spinner"></div><div class="loading-txt">Mevsimsel veriler yükleniyor (~30 sn)...</div></div>
+    </div>
+  </div>
+
+  <!-- DEMO TRADING -->
+  <div class="tab-panel" id="panel-demo">
+    <div class="sec-hdr">
+      <h3>🤖 AI Demo Trading <span id="demo-badge" class="demo-badge off">yükleniyor…</span></h3>
+      <button class="btn-primary" onclick="demoSetBalance()" style="font-size:11px">💰 Bakiyeyi Ayarla</button>
+    </div>
+    <div class="demo-wrap" id="demo-content">
+      <div class="loading-wrap"><div class="spinner"></div><div class="loading-txt">Demo portföy yükleniyor...</div></div>
     </div>
   </div>
 
@@ -1149,6 +1185,7 @@ function switchTab(tab,btn){
   document.querySelectorAll(".tab-panel").forEach(p=>p.classList.remove("active"));
   btn.classList.add("active");
   document.getElementById("panel-"+tab).classList.add("active");
+  demoStopPolling();
   if(tab==="mevsim"){
     if(seasonalData && Object.keys(seasonalData).length>0){
       renderSeasonal();  // Veri zaten hazır — hemen göster
@@ -1156,6 +1193,8 @@ function switchTab(tab,btn){
       renderSeasonal();  // loading spinner göster
       fetchSeasonal();   // Hemen tekrar dene (polling'i beklemeden)
     }
+  } else if(tab==="demo"){
+    loadDemo(); demoStartPolling();
   } else render();
 }
 
@@ -1356,6 +1395,156 @@ setInterval(()=>{
   }
   if(now.getHours() !== 9) dailyReportSent = false;
 }, 30000);
+
+// ═══════════════════════════════════════════════════════
+//  AI DEMO TRADING
+// ═══════════════════════════════════════════════════════
+let demoTimer=null, demoLoading=false;
+function demoEsc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function demoUsd(v){ if(v==null||isNaN(v)) return "—"; return (v<0?"-":"")+"$"+Math.abs(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function demoPct(v){ if(v==null||isNaN(v)) return "—"; return (v>0?"+":"")+v.toFixed(2)+"%"; }
+function demoCls(v){ return v>0?"pos":v<0?"neg":""; }
+function demoAgo(iso){
+  if(!iso) return "henüz yok";
+  const m=Math.round((Date.now()-new Date(iso).getTime())/60000);
+  if(m<1) return "az önce"; if(m<60) return m+" dk önce";
+  if(m<1440) return Math.floor(m/60)+" sa önce";
+  return Math.floor(m/1440)+" gün önce";
+}
+function demoFmtDate(iso){
+  try{ return new Date(iso).toLocaleString("tr-TR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}); }catch(e){ return iso; }
+}
+function demoStartPolling(){ demoStopPolling(); demoTimer=setInterval(loadDemo,30000); }
+function demoStopPolling(){ if(demoTimer){ clearInterval(demoTimer); demoTimer=null; } }
+
+async function loadDemo(){
+  if(demoLoading) return;
+  demoLoading=true;
+  try{
+    const [s,hi]=await Promise.all([
+      fetch("/api/demo/status").then(r=>r.json()),
+      fetch("/api/demo/history").then(r=>r.json())
+    ]);
+    renderDemo(s,hi);
+  }catch(e){
+    document.getElementById("demo-content").innerHTML=`<p class="demo-err">Demo verisi alınamadı: ${demoEsc(e.message)}</p>`;
+  }finally{ demoLoading=false; }
+}
+
+function demoChartSVG(snaps,base){
+  if(!snaps||snaps.length<2) return `<p class="muted" style="padding:30px;text-align:center;font-size:12px">📈 Grafik, AI'ın ilk analiz turundan sonra oluşacak (borsa saatlerinde her 30 dk).</p>`;
+  const W=800,H=190,P=8;
+  const pts=snaps.map(s=>({t:new Date(s.t).getTime(),v:s.deger}));
+  const t0=pts[0].t, t1=pts[pts.length-1].t;
+  let lo=Math.min(base,...pts.map(p=>p.v)), hi=Math.max(base,...pts.map(p=>p.v));
+  if(hi-lo<1e-9){ hi+=1; lo-=1; }
+  const pad=(hi-lo)*0.12; lo-=pad; hi+=pad;
+  const X=t=>P+(t1===t0?0:(t-t0)/(t1-t0))*(W-2*P);
+  const Y=v=>H-P-((v-lo)/(hi-lo))*(H-2*P);
+  const last=pts[pts.length-1].v, col=last>=base?"#10b981":"#ef4444";
+  const line=pts.map(p=>`${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join(" ");
+  const area=`${X(t0).toFixed(1)},${H-P} ${line} ${X(t1).toFixed(1)},${H-P}`;
+  const by=Y(base).toFixed(1);
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <polygon points="${area}" fill="${col}" opacity=".12"/>
+    <line x1="${P}" x2="${W-P}" y1="${by}" y2="${by}" stroke="#64748b" stroke-width="1" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>
+    <polyline points="${line}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/>
+  </svg>
+  <div class="muted" style="display:flex;justify-content:space-between;font-size:10.5px;margin-top:4px">
+    <span>${demoFmtDate(snaps[0].t)}</span><span>Kesikli çizgi: başlangıç ${demoUsd(base)}</span><span>${demoFmtDate(snaps[snaps.length-1].t)}</span>
+  </div>`;
+}
+
+function renderDemo(s,hi){
+  const badge=document.getElementById("demo-badge");
+  if(!s.ai_aktif){ badge.className="demo-badge off"; badge.textContent="AI anahtarı yok"; }
+  else if(s.analiz_suruyor){ badge.className="demo-badge busy"; badge.textContent="AI analiz ediyor…"; }
+  else if(s.borsa_acik){ badge.className="demo-badge on"; badge.textContent="Borsa açık • AI aktif"; }
+  else { badge.className="demo-badge off"; badge.textContent="Borsa kapalı"; }
+
+  const perfLbl={"1h":"1 Hafta","1a":"1 Ay","3a":"3 Ay"};
+  const perfHtml=["1h","1a","3a"].map(k=>{
+    const p=s.performans[k]; const w=Math.min(100,(p.gecen_gun/p.hedef_gun)*100);
+    return `<div class="demo-card perf-tile">
+      <div class="lbl">${perfLbl[k]} Getirisi</div>
+      <div class="val ${demoCls(p.kar_usd)}">${demoUsd(p.kar_usd)}</div>
+      <div class="sub ${demoCls(p.kar_usd)}">${demoPct(p.kar_yuzde)}</div>
+      <div class="bar"><i style="width:${w.toFixed(0)}%"></i></div>
+      <div class="sub">${p.tamamlandi?"✅ Süre doldu (kayan pencere)":`⏳ ${p.gecen_gun}/${p.hedef_gun} gün (başlangıca göre)`}</div>
+    </div>`;
+  }).join("");
+
+  const st=s.istatistik;
+  const posRows=s.pozisyonlar.length?s.pozisyonlar.map(p=>`<tr>
+    <td class="ticker" onclick="openChart('${demoEsc(p.sembol)}.IS','${demoEsc(p.sembol)}')">${demoEsc(p.sembol)}</td>
+    <td>${p.adet}</td><td>${p.alis_fiyat} ₺</td><td>${p.guncel_fiyat!=null?p.guncel_fiyat+" ₺":"—"}</td>
+    <td>${demoUsd(p.deger_usd)}</td>
+    <td class="${demoCls(p.kar_usd)}" style="font-weight:600">${demoUsd(p.kar_usd)} (${demoPct(p.kar_yuzde)})</td>
+    <td class="muted">${demoFmtDate(p.alis_tarih)}</td></tr>`).join("")
+    :`<tr><td colspan="7" class="muted" style="text-align:center;padding:18px">Açık pozisyon yok — AI şu an nakitte bekliyor.</td></tr>`;
+
+  const tradeRows=hi.islemler.length?hi.islemler.map(t=>`<tr>
+    <td class="muted">${demoFmtDate(t.tarih)}</td>
+    <td><span class="trade-tag ${t.tip==="AL"?"al":"sat"}">${demoEsc(t.tip)}</span></td>
+    <td class="ticker" onclick="openChart('${demoEsc(t.sembol)}.IS','${demoEsc(t.sembol)}')">${demoEsc(t.sembol)}</td>
+    <td>${t.adet}</td><td>${t.fiyat} ₺</td><td>${demoUsd(t.toplam_usd)}</td>
+    <td class="${t.tip==="SAT"?demoCls(t.kar_usd):"muted"}" style="font-weight:600">${t.tip==="SAT"?`${demoUsd(t.kar_usd)} (${demoPct(t.kar_yuzde)})`:"—"}</td>
+    <td class="reason-cell">${demoEsc(t.sebep)}</td></tr>`).join("")
+    :`<tr><td colspan="8" class="muted" style="text-align:center;padding:18px">Henüz işlem yapılmadı.</td></tr>`;
+
+  document.getElementById("demo-content").innerHTML=`
+    <div class="demo-grid">
+      <div class="demo-card hero"><div class="lbl">Toplam Değer</div><div class="val">${demoUsd(s.toplam_deger)}</div>
+        <div class="sub">Başlangıç: ${demoUsd(s.baslangic_bakiye)}</div></div>
+      <div class="demo-card"><div class="lbl">Toplam Kâr / Zarar</div>
+        <div class="val ${demoCls(s.kar_usd)}">${demoUsd(s.kar_usd)}</div>
+        <div class="sub ${demoCls(s.kar_usd)}">${demoPct(s.kar_yuzde)}</div></div>
+      <div class="demo-card"><div class="lbl">Nakit</div><div class="val">${demoUsd(s.nakit)}</div>
+        <div class="sub">Pozisyonlarda: ${demoUsd(s.pozisyon_degeri)}</div></div>
+      <div class="demo-card"><div class="lbl">Kazanma Oranı</div>
+        <div class="val">${st.kazanma_orani!=null?st.kazanma_orani+"%":"—"}</div>
+        <div class="sub">${st.kazanan}/${st.kapanan_islem} kapanan işlem • Gerçekleşen: <span class="${demoCls(st.gerceklesen_kar)}">${demoUsd(st.gerceklesen_kar)}</span></div></div>
+    </div>
+
+    <div class="demo-h4">📊 Zaman Dilimine Göre Performans</div>
+    <div class="demo-grid">${perfHtml}</div>
+
+    <div class="demo-note">🧠 <b>AI'ın son değerlendirmesi:</b> ${demoEsc(s.son_ozet)}
+      <small>Son analiz: ${demoAgo(s.son_analiz)} • Toplam ${s.analiz_sayisi} analiz • Borsa açıkken her ${s.periyot_dk} dk • USD/TRY: ${s.kur||"—"}</small>
+      ${s.son_hata?`<div class="demo-err">⚠️ Son hata: ${demoEsc(s.son_hata)}</div>`:""}
+    </div>
+
+    <div class="demo-h4">📈 Portföy Değeri</div>
+    <div class="demo-chart">${demoChartSVG(hi.snapshots,hi.baslangic_bakiye)}</div>
+
+    <div class="demo-h4">💼 Açık Pozisyonlar</div>
+    <div class="table-wrap"><table><thead><tr>
+      <th>Sembol</th><th>Adet</th><th>Alış</th><th>Güncel</th><th>Değer</th><th>Kâr/Zarar</th><th>Alış Zamanı</th>
+    </tr></thead><tbody>${posRows}</tbody></table></div>
+
+    <div class="demo-h4">🧾 İşlem Geçmişi (son 100)</div>
+    <div class="table-wrap"><table><thead><tr>
+      <th>Zaman</th><th>İşlem</th><th>Sembol</th><th>Adet</th><th>Fiyat</th><th>Tutar</th><th>Kâr/Zarar</th><th>AI Gerekçesi</th>
+    </tr></thead><tbody>${tradeRows}</tbody></table></div>
+
+    <p class="demo-warn">⚠️ Bu tamamen <b>sanal bir simülasyondur</b>; gerçek para kullanılmaz ve yatırım tavsiyesi değildir.
+    Fiyatlar TradingView verisidir (gecikmeli olabilir), kâr/zarar USD/TRY kur değişimini ve %${(s.komisyon*100).toFixed(1)} işlem komisyonunu içerir.
+    AI yalnızca long (al→sat) işlem yapar, kaldıraç yoktur. Sen sadece başlangıç bakiyesini ayarlayabilirsin.</p>`;
+}
+
+async function demoSetBalance(){
+  const v=prompt("Yeni başlangıç bakiyesi (USD):\n\n⚠️ Portföy, pozisyonlar ve işlem geçmişi SIFIRLANIR ve AI bu bakiyeyle baştan başlar.","1000");
+  if(v===null) return;
+  const n=parseFloat(String(v).replace(",","."));
+  if(!isFinite(n)){ alert("Geçerli bir sayı girin."); return; }
+  if(!confirm(`Demo portföy ${demoUsd(n)} bakiye ile sıfırdan başlatılsın mı?`)) return;
+  try{
+    const r=await fetch("/api/demo/reset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bakiye:n})});
+    const d=await r.json();
+    if(!r.ok){ alert(d.error||"Bakiye ayarlanamadı"); return; }
+    loadDemo();
+  }catch(e){ alert("Bağlantı hatası: "+e.message); }
+}
 
 // ═══════════════════════════════════════════════════════
 //  INIT
