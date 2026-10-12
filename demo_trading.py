@@ -117,12 +117,99 @@ def _remote(cmd):
     return data.get("result")
 
 
+def _database_url():
+    return (os.environ.get("DATABASE_URL") or "").strip()
+
+
+def _pg_params(url):
+    """DATABASE_URL -> pg8000 bağlantı parametreleri."""
+    from urllib.parse import urlparse, unquote, parse_qs
+    u = urlparse(url)
+    if u.scheme not in ("postgres", "postgresql") or not u.hostname:
+        raise ValueError("DATABASE_URL geçersiz (postgres://kullanici:sifre@host:port/db olmalı)")
+    q = parse_qs(u.query)
+    return {
+        "user": unquote(u.username or ""),
+        "password": unquote(u.password or ""),
+        "host": u.hostname,
+        "port": u.port or 5432,
+        "database": (u.path or "/").lstrip("/") or "postgres",
+        "sslmode": (q.get("sslmode") or [""])[0],
+    }
+
+
+def _pg_connect():
+    import ssl
+    import pg8000.native
+    prm = _pg_params(_database_url())
+    sslmode = prm.pop("sslmode")
+    local = prm["host"] in ("localhost", "127.0.0.1", "::1")
+    attempts = [None] if (sslmode == "disable" or local) else [True, None]
+    last = None
+    for use_ssl in attempts:
+        ctx = None
+        if use_ssl:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False          # Render/Neon/Supabase: şifreli bağlantı, sertifika doğrulaması yok
+            ctx.verify_mode = ssl.CERT_NONE
+        try:
+            con = pg8000.native.Connection(ssl_context=ctx, timeout=10, **prm)
+            con.run("CREATE TABLE IF NOT EXISTS demo_state ("
+                    "key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT now())")
+            return con
+        except Exception as exc:
+            last = exc
+    raise last
+
+
+def _pg_get():
+    con = _pg_connect()
+    try:
+        rows = con.run("SELECT value FROM demo_state WHERE key = :k", k=REDIS_KEY)
+        return rows[0][0] if rows else None
+    finally:
+        con.close()
+
+
+def _pg_set(text):
+    con = _pg_connect()
+    try:
+        con.run("INSERT INTO demo_state (key, value) VALUES (:k, :v) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()",
+                k=REDIS_KEY, v=text)
+    finally:
+        con.close()
+
+
+def backend():
+    """Aktif depolama: 'postgres' > 'upstash' > 'dosya'."""
+    if _database_url():
+        return "postgres"
+    if _upstash():
+        return "upstash"
+    return "dosya"
+
+
+def _store_get():
+    """Uzak depodan ham JSON metni (yoksa None). Erişilemezse exception fırlatır."""
+    if backend() == "postgres":
+        return _pg_get()
+    return _remote(["GET", REDIS_KEY])
+
+
+def _store_set(text):
+    if backend() == "postgres":
+        _pg_set(text)
+    else:
+        _remote(["SET", REDIS_KEY, text])
+
+
 def is_cloud():
     return bool(os.environ.get("RENDER") or os.environ.get("RENDER_EXTERNAL_URL"))
 
 
 def is_persistent():
-    return bool(_upstash()) or not is_cloud()
+    return backend() != "dosya" or not is_cloud()
 
 
 def _load():
@@ -131,8 +218,8 @@ def _load():
     with _dlock:
         if not _mem["loaded"]:
             p = None
-            if _upstash():
-                raw = _remote(["GET", REDIS_KEY])
+            if backend() != "dosya":
+                raw = _store_get()
                 p = json.loads(raw) if raw else None
             elif os.path.exists(PORTFOLIO_FILE):
                 try:
@@ -146,15 +233,16 @@ def _load():
 
 def _save(p):
     with _dlock:
-        if _upstash():
-            _remote(["SET", REDIS_KEY, json.dumps(p, ensure_ascii=False)])   # başarısızsa bellek de güncellenmez
+        remote = backend() != "dosya"
+        if remote:
+            _store_set(json.dumps(p, ensure_ascii=False))   # başarısızsa bellek de güncellenmez
         try:
             tmp = PORTFOLIO_FILE + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(p, f, ensure_ascii=False, indent=1)
             os.replace(tmp, PORTFOLIO_FILE)
         except Exception as exc:
-            if not _upstash():
+            if not remote:
                 raise
             print("[demo] yerel yedek yazilamadi:", exc, flush=True)
         _mem["p"], _mem["loaded"] = copy.deepcopy(p), True
@@ -554,7 +642,7 @@ def init(app, get_stocks, get_key):
                 "periyot_dk": CYCLE_MINUTES,
                 "komisyon": COMMISSION,
                 "kalici": is_persistent(),
-                "depolama": "upstash" if _upstash() else "dosya",
+                "depolama": backend(),
                 "sifre_gerekli": bool(os.environ.get("DEMO_ADMIN_PASSWORD")),
                 "yonetim_acik": bool(os.environ.get("DEMO_ADMIN_PASSWORD")) or not is_cloud(),
             })

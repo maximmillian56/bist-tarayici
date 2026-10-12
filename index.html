@@ -1514,7 +1514,7 @@ function renderDemo(s,hi){
     <div class="demo-note">🧠 <b>AI'ın son değerlendirmesi:</b> ${demoEsc(s.son_ozet)}
       <small>Son analiz: ${demoAgo(s.son_analiz)} • Toplam ${s.analiz_sayisi} analiz • Borsa açıkken her ${s.periyot_dk} dk • USD/TRY: ${s.kur||"—"}</small>
       ${s.son_hata?`<div class="demo-err">⚠️ Son hata: ${demoEsc(s.son_hata)}</div>`:""}
-      ${!s.kalici?`<div class="demo-err">⚠️ Kalıcı depolama yok: sunucu yeniden başlarsa portföy sıfırlanır. Render'a UPSTASH_REDIS_REST_URL ve UPSTASH_REDIS_REST_TOKEN ekle.</div>`:""}
+      ${!s.kalici?`<div class="demo-err">⚠️ Kalıcı depolama yok: sunucu yeniden başlarsa portföy sıfırlanır. Render'a DATABASE_URL (PostgreSQL) ekle.</div>`:""}
     </div>
 
     <div class="demo-h4">📈 Portföy Değeri</div>
