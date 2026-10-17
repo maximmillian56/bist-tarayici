@@ -6,6 +6,7 @@
 <title>BIST Tarayıcı Pro — Profesyonel Hisse Analizi</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 :root{
   --bg:#080c14;--bg2:#0d1220;--bg3:#111827;
@@ -194,7 +195,7 @@ td.nm{max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);
 /* ── MODAL ── */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:500;align-items:center;justify-content:center}
 .modal-overlay.open{display:flex}
-.modal-box{background:var(--bg2);border:1px solid var(--border2);border-radius:12px;width:min(920px,96vw);max-height:93vh;display:flex;flex-direction:column;overflow:hidden}
+.modal-box{background:var(--bg2);border:1px solid var(--border2);border-radius:12px;width:min(1080px,96vw);max-height:94vh;display:flex;flex-direction:column;overflow:hidden}
 .modal-hdr{display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--border);flex-shrink:0}
 .modal-hdr h4{font-size:14px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .modal-close{background:transparent;border:none;color:var(--muted);font-size:19px;cursor:pointer;padding:2px 5px;border-radius:4px;flex-shrink:0}
@@ -203,8 +204,27 @@ td.nm{max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);
 .modal-tf-btn{padding:3px 11px;border-radius:6px;font-size:11px;font-weight:600;background:var(--bg2);border:1px solid var(--border);color:var(--muted);cursor:pointer;transition:all var(--tr)}
 .modal-tf-btn:hover{border-color:var(--primary);color:var(--text)}
 .modal-tf-btn.active{background:var(--primary);border-color:var(--primary);color:#fff}
-.modal-body{flex:1;overflow:hidden}
-.tv-wrap{width:100%;height:500px}
+.modal-body{flex:1;overflow:auto;display:flex;flex-direction:column}
+.tv-wrap{width:100%;display:flex;flex-direction:column;flex:1}
+
+/* ── LIGHTWEIGHT CHARTS ── */
+.lwc-top-bar{display:flex;gap:5px;padding:7px 12px;background:var(--bg3);border-bottom:1px solid var(--border);align-items:center;flex-wrap:wrap;flex-shrink:0}
+.lwc-label{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-right:2px;white-space:nowrap}
+.lwc-sep{width:1px;height:16px;background:var(--border2);margin:0 4px;flex-shrink:0}
+.lwc-period-btn{padding:3px 9px;border-radius:5px;font-size:11px;font-weight:600;background:var(--bg2);border:1px solid var(--border);color:var(--muted);cursor:pointer;transition:all var(--tr);white-space:nowrap}
+.lwc-period-btn:hover{border-color:var(--primary);color:var(--text)}
+.lwc-period-btn.active{background:var(--primary);border-color:var(--primary);color:#fff}
+.lwc-toggle{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer;white-space:nowrap;user-select:none}
+.lwc-toggle input{accent-color:var(--primary);cursor:pointer;width:12px;height:12px}
+.lwc-loading{display:flex;align-items:center;justify-content:center;height:450px;gap:10px;color:var(--muted);font-size:13px;flex-direction:column}
+.lwc-error{padding:30px;text-align:center;color:var(--red);font-size:13px}
+.lwc-pane-label{position:absolute;top:6px;left:10px;font-size:10px;color:#94a3b8;z-index:10;pointer-events:none;font-weight:600;letter-spacing:.5px;background:rgba(13,18,32,0.7);padding:2px 6px;border-radius:4px}
+.lwc-pane-wrap{position:relative;border-top:1px solid var(--border)}
+.lwc-legend{display:flex;align-items:center;gap:12px;padding:6px 14px;background:var(--bg2);font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);flex-wrap:wrap;min-height:30px}
+.lwc-legend span b{font-weight:600}
+.lwc-legend .c-up{color:var(--green)}
+.lwc-legend .c-down{color:var(--red)}
+.lwc-legend-val{color:var(--text);font-weight:500}
 .news-badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;flex-shrink:0}
 .news-iyi{background:rgba(16,185,129,.2);color:#34d399;border:1px solid rgba(16,185,129,.4)}
 .news-notr{background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.3)}
@@ -571,11 +591,36 @@ tr.is-fav{background:rgba(245,158,11,.04)}
       <button class="btn-fullscreen" onclick="toggleFullscreen()" title="Tam ekran">⛶ Tam Ekran</button>
       <button class="modal-close" onclick="closeChart()">✕</button>
     </div>
-    <div class="modal-tf-bar">
-      <button class="modal-tf-btn" data-tf="60"  onclick="setChartTF(this)">1 Saat</button>
-      <button class="modal-tf-btn" data-tf="240" onclick="setChartTF(this)">4 Saat</button>
-      <button class="modal-tf-btn active" data-tf="D" onclick="setChartTF(this)">Günlük</button>
-      <button class="modal-tf-btn" data-tf="W"   onclick="setChartTF(this)">Haftalık</button>
+    <div class="modal-tf-bar" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <span class="lwc-label">Zaman:</span>
+      <button class="modal-tf-btn" data-tf="1h"  onclick="setChartTF(this)">1S</button>
+      <button class="modal-tf-btn" data-tf="4h" onclick="setChartTF(this)">4S</button>
+      <button class="modal-tf-btn active" data-tf="1d" onclick="setChartTF(this)">Günlük</button>
+      <button class="modal-tf-btn" data-tf="1wk"   onclick="setChartTF(this)">Haftalık</button>
+      <span class="lwc-sep"></span>
+      <span class="lwc-label">Dönem:</span>
+      <button class="lwc-period-btn" data-period="1mo" onclick="setChartPeriod(this)">1A</button>
+      <button class="lwc-period-btn" data-period="3mo" onclick="setChartPeriod(this)">3A</button>
+      <button class="lwc-period-btn" data-period="6mo" onclick="setChartPeriod(this)">6A</button>
+      <button class="lwc-period-btn active" data-period="1y" onclick="setChartPeriod(this)">1Y</button>
+      <button class="lwc-period-btn" data-period="5y" onclick="setChartPeriod(this)">5Y</button>
+      <span class="lwc-sep"></span>
+      <span class="lwc-label">Göstergeler:</span>
+      <label class="lwc-toggle" title="20 Günlük EMA"><input type="checkbox" id="lwc-chk-ema20" checked onchange="updateLwcIndicators()"><span>EMA20</span></label>
+      <label class="lwc-toggle" title="50 Günlük EMA"><input type="checkbox" id="lwc-chk-ema50" checked onchange="updateLwcIndicators()"><span>EMA50</span></label>
+      <label class="lwc-toggle" title="200 Günlük EMA"><input type="checkbox" id="lwc-chk-ema200" onchange="updateLwcIndicators()"><span>EMA200</span></label>
+      <label class="lwc-toggle" title="Bollinger Bantları (20, 2)"><input type="checkbox" id="lwc-chk-bb" onchange="updateLwcIndicators()"><span>BB</span></label>
+      <label class="lwc-toggle" title="Göreceli Güç Endeksi (14)"><input type="checkbox" id="lwc-chk-rsi" checked onchange="updateLwcIndicators()"><span>RSI(14)</span></label>
+    </div>
+    <div class="lwc-legend" id="lwc-legend">
+      <span>Tarih: <span class="lwc-legend-val" id="leg-date">—</span></span>
+      <span>A: <span class="lwc-legend-val" id="leg-open">—</span></span>
+      <span>Y: <span class="lwc-legend-val" id="leg-high">—</span></span>
+      <span>D: <span class="lwc-legend-val" id="leg-low">—</span></span>
+      <span>K: <span class="lwc-legend-val" id="leg-close">—</span></span>
+      <span>Fark: <span class="lwc-legend-val" id="leg-chg">—</span></span>
+      <span>Hacim: <span class="lwc-legend-val" id="leg-vol">—</span></span>
+      <span id="leg-ind-wrap" style="display:flex;gap:8px;margin-left:auto"></span>
     </div>
     <div class="modal-body"><div class="tv-wrap" id="tv-wrap"></div></div>
   </div>
@@ -621,8 +666,22 @@ let xktumOnly   = false;
 let favOnly     = false;
 let pivotTF     = "W";
 let hacimView   = "hacim";
-let chartTF     = "D";
+let chartTF     = "1d";
+let chartPeriod = "1y";
 let chartSymbol = "";
+let lwcMainChart = null;
+let lwcRsiChart  = null;
+let lwcCandleSeries = null;
+let lwcVolumeSeries = null;
+let lwcEma20Series  = null;
+let lwcEma50Series  = null;
+let lwcEma200Series = null;
+let lwcBbUpperSeries = null;
+let lwcBbMiddleSeries = null;
+let lwcBbLowerSeries = null;
+let lwcRsiSeries    = null;
+let lwcRawData      = [];
+let lwcResizeObserver = null;
 
 // Favoriler — localStorage'da kalıcı
 let favorites = new Set(JSON.parse(localStorage.getItem("bist_favorites") || "[]"));
@@ -767,78 +826,490 @@ function setHacimView(btn){
 }
 
 // ═══════════════════════════════════════════════════════
-//  CHART MODAL
+//  LIGHTWEIGHT CHARTS (BIST PRO GRAFİK MOTORU)
 // ═══════════════════════════════════════════════════════
-function openChart(ticker,name){
-  chartSymbol=ticker;
-  const sym=ticker.replace(".IS","");
-  document.getElementById("modal-title").textContent=sym+" — "+name;
-  const nb=document.getElementById("modal-news-badge");
-  nb.textContent="⏳ Haber..."; nb.className="news-badge news-load";
+function openChart(ticker, name){
+  chartSymbol = ticker;
+  const sym = ticker.replace(".IS","");
+  document.getElementById("modal-title").textContent = sym + " — " + (name || "");
+  const nb = document.getElementById("modal-news-badge");
+  nb.textContent = "⏳ Haber..."; nb.className = "news-badge news-load";
+  
+  // Aktif butonları varsayılana getir (Günlük / 1Y)
+  chartTF = "1d";
+  chartPeriod = "1y";
+  document.querySelectorAll(".modal-tf-btn").forEach(b => b.classList.toggle("active", b.dataset.tf === chartTF));
+  document.querySelectorAll(".lwc-period-btn").forEach(b => b.classList.toggle("active", b.dataset.period === chartPeriod));
+
   document.getElementById("chart-modal").classList.add("open");
-  document.querySelectorAll(".modal-tf-btn").forEach(b=>b.classList.remove("active"));
-  document.querySelector(".modal-tf-btn[data-tf='D']").classList.add("active");
-  chartTF="D"; loadTV(); document.body.style.overflow="hidden";
-  updateModalFavBtn();  // Favori durumunu güncelle
-  fetch("/api/news/"+sym).then(r=>r.json()).then(d=>{
-    const cls=d.sentiment==="iyi"?"news-iyi":d.sentiment==="kotu"?"news-kotu":"news-notr";
-    nb.textContent="📰 "+(d.badge||"—"); nb.className="news-badge "+cls;
-    nb.title="KAP Haber Sentiment — "+d.kaynak;
-  }).catch(()=>{ nb.textContent=""; });
+  document.body.style.overflow = "hidden";
+  updateModalFavBtn();
+
+  loadLwcChart();
+
+  fetch("/api/news/" + sym).then(r => r.json()).then(d => {
+    const cls = d.sentiment === "iyi" ? "news-iyi" : d.sentiment === "kotu" ? "news-kotu" : "news-notr";
+    nb.textContent = "📰 " + (d.badge || "—"); nb.className = "news-badge " + cls;
+    nb.title = "KAP Haber Sentiment — " + d.kaynak;
+  }).catch(() => { nb.textContent = ""; });
 }
+
 function closeChart(){
   document.getElementById("chart-modal").classList.remove("open");
-  document.getElementById("tv-wrap").innerHTML="";
-  document.body.style.overflow="";
+  document.body.style.overflow = "";
+  disposeLwc();
+  document.getElementById("tv-wrap").innerHTML = "";
+  resetLegend();
 }
-function closeChartOnOverlay(e){ if(e.target===document.getElementById("chart-modal")) closeChart(); }
+
+function closeChartOnOverlay(e){
+  if(e.target === document.getElementById("chart-modal")) closeChart();
+}
+
 function setChartTF(btn){
-  document.querySelectorAll(".modal-tf-btn").forEach(b=>b.classList.remove("active"));
-  btn.classList.add("active"); chartTF=btn.dataset.tf; loadTV();
+  document.querySelectorAll(".modal-tf-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  chartTF = btn.dataset.tf;
+  loadLwcChart();
 }
-function loadTV(){
+
+function setChartPeriod(btn){
+  document.querySelectorAll(".lwc-period-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  chartPeriod = btn.dataset.period;
+  loadLwcChart();
+}
+
+function updateLwcIndicators(){
+  if(lwcRawData && lwcRawData.length > 0){
+    renderLwcData(lwcRawData);
+  }
+}
+
+function disposeLwc(){
+  if(lwcResizeObserver){
+    try { lwcResizeObserver.disconnect(); } catch(e){}
+    lwcResizeObserver = null;
+  }
+  if(lwcMainChart){
+    try { lwcMainChart.remove(); } catch(e){}
+    lwcMainChart = null;
+  }
+  if(lwcRsiChart){
+    try { lwcRsiChart.remove(); } catch(e){}
+    lwcRsiChart = null;
+  }
+  lwcCandleSeries = null;
+  lwcVolumeSeries = null;
+  lwcEma20Series  = null;
+  lwcEma50Series  = null;
+  lwcEma200Series = null;
+  lwcBbUpperSeries= null;
+  lwcBbMiddleSeries= null;
+  lwcBbLowerSeries= null;
+  lwcRsiSeries    = null;
+}
+
+function resetLegend(){
+  const ids = ["leg-date","leg-open","leg-high","leg-low","leg-close","leg-chg","leg-vol"];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if(el) { el.textContent = "—"; el.className = "lwc-legend-val"; }
+  });
+  const indWrap = document.getElementById("leg-ind-wrap");
+  if(indWrap) indWrap.innerHTML = "";
+}
+
+// ── Matematiksel Gösterge Hesaplayıcıları ──
+function calcEMA(data, period){
+  if(!data || data.length < period) return [];
+  const k = 2 / (period + 1);
+  let ema = 0;
+  for(let i = 0; i < period; i++) ema += data[i].close;
+  ema /= period;
+  const res = [{ time: data[period - 1].time, value: ema }];
+  for(let i = period; i < data.length; i++){
+    ema = data[i].close * k + ema * (1 - k);
+    res.push({ time: data[i].time, value: ema });
+  }
+  return res;
+}
+
+function calcBB(data, period = 20, stdDev = 2){
+  if(!data || data.length < period) return { upper: [], middle: [], lower: [] };
+  const upper = [], middle = [], lower = [];
+  for(let i = period - 1; i < data.length; i++){
+    let sum = 0;
+    for(let j = i - period + 1; j <= i; j++) sum += data[j].close;
+    const mean = sum / period;
+    let sumSquares = 0;
+    for(let j = i - period + 1; j <= i; j++) sumSquares += Math.pow(data[j].close - mean, 2);
+    const std = Math.sqrt(sumSquares / period);
+    const t = data[i].time;
+    middle.push({ time: t, value: mean });
+    upper.push({ time: t, value: mean + stdDev * std });
+    lower.push({ time: t, value: mean - stdDev * std });
+  }
+  return { upper, middle, lower };
+}
+
+function calcRSI(data, period = 14){
+  if(!data || data.length <= period) return [];
+  const res = [];
+  let gains = 0, losses = 0;
+  for(let i = 1; i <= period; i++){
+    const diff = data[i].close - data[i - 1].close;
+    if(diff >= 0) gains += diff;
+    else losses -= diff;
+  }
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+  let rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+  res.push({ time: data[period].time, value: 100 - (100 / (1 + rs)) });
+
+  for(let i = period + 1; i < data.length; i++){
+    const diff = data[i].close - data[i - 1].close;
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? -diff : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+    rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    res.push({ time: data[i].time, value: 100 - (100 / (1 + rs)) });
+  }
+  return res;
+}
+
+// ── Grafik Yükleme ve Çizim ──
+async function loadLwcChart(){
   const wrap = document.getElementById("tv-wrap");
+  disposeLwc();
+  resetLegend();
+  wrap.innerHTML = `
+    <div class="lwc-loading">
+      <div class="spinner"></div>
+      <div>Grafik verisi yükleniyor (<b>${chartSymbol.replace('.IS','')}</b>)...</div>
+    </div>`;
+
+  try {
+    const url = `/api/chart/${encodeURIComponent(chartSymbol)}?interval=${chartTF}&period=${chartPeriod}`;
+    const res = await fetch(url);
+    const json = await res.json();
+
+    if(json.error || !json.data || json.data.length === 0){
+      wrap.innerHTML = `
+        <div class="lwc-error">
+          <p style="font-size:15px;font-weight:600;margin-bottom:6px">⚠️ Grafik verisi alınamadı</p>
+          <p style="color:var(--muted);font-size:12px">${json.error || 'Bu hisse için belirtilen zaman diliminde veri bulunamadı.'}</p>
+        </div>`;
+      return;
+    }
+
+    lwcRawData = json.data;
+    renderLwcData(lwcRawData);
+
+  } catch(err){
+    console.error("LWC Chart fetch error:", err);
+    wrap.innerHTML = `
+      <div class="lwc-error">
+        <p style="font-size:15px;font-weight:600;margin-bottom:6px">⚠️ Bağlantı Hatası</p>
+        <p style="color:var(--muted);font-size:12px">${err.message}</p>
+      </div>`;
+  }
+}
+
+function renderLwcData(data){
+  const wrap = document.getElementById("tv-wrap");
+  disposeLwc();
   wrap.innerHTML = "";
-  const sym = chartSymbol.replace(".IS","");
 
-  // ── TradingView Advanced Chart Widget ──
-  // Eski tv.js'den farklı olarak:
-  //   • Her çağrıda tamamen bağımsız — global TradingView nesnesi kullanmaz
-  //   • BIST sembolleri için "sadece TradingView'de" popup'u göstermez
-  //   • Cache sorunu yoktur; her açılışta yeni widget oluşturulur
+  if(typeof LightweightCharts === "undefined"){
+    wrap.innerHTML = `<div class="lwc-error">LightweightCharts kütüphanesi yüklenemedi.</div>`;
+    return;
+  }
 
-  const container = document.createElement("div");
-  container.className = "tradingview-widget-container";
-  container.style.cssText = "width:100%;height:500px";
+  const showEma20  = document.getElementById("lwc-chk-ema20")?.checked ?? true;
+  const showEma50  = document.getElementById("lwc-chk-ema50")?.checked ?? true;
+  const showEma200 = document.getElementById("lwc-chk-ema200")?.checked ?? false;
+  const showBb     = document.getElementById("lwc-chk-bb")?.checked ?? false;
+  const showRsi    = document.getElementById("lwc-chk-rsi")?.checked ?? true;
 
-  const widgetDiv = document.createElement("div");
-  widgetDiv.className = "tradingview-widget-container__widget";
-  widgetDiv.style.cssText = "height:100%;width:100%";
-  container.appendChild(widgetDiv);
+  const totalHeight = 490;
+  const rsiHeight   = showRsi ? 130 : 0;
+  const mainHeight  = totalHeight - rsiHeight;
 
-  const config = {
-    autosize:            true,
-    symbol:              "BIST:" + sym,
-    interval:            chartTF,
-    timezone:            "Europe/Istanbul",
-    theme:               "dark",
-    style:               "1",
-    locale:              "tr",
-    hide_top_toolbar:    false,
-    hide_side_toolbar:   false,
-    allow_symbol_change: false,
-    save_image:          false,
-    support_host:        "https://www.tradingview.com"
+  // Ana Panel Container
+  const mainContainer = document.createElement("div");
+  mainContainer.style.width = "100%";
+  mainContainer.style.height = mainHeight + "px";
+  mainContainer.style.position = "relative";
+  wrap.appendChild(mainContainer);
+
+  // RSI Panel Container (Açık ise)
+  let rsiContainer = null;
+  if(showRsi){
+    rsiContainer = document.createElement("div");
+    rsiContainer.className = "lwc-pane-wrap";
+    rsiContainer.style.width = "100%";
+    rsiContainer.style.height = rsiHeight + "px";
+    rsiContainer.innerHTML = `<span class="lwc-pane-label">RSI(14)</span>`;
+    wrap.appendChild(rsiContainer);
+  }
+
+  const commonChartOptions = {
+    layout: {
+      background: { type: "solid", color: "#0d1220" },
+      textColor:  "#94a3b8",
+      fontFamily: "'JetBrains Mono', 'Inter', sans-serif",
+      fontSize:   11
+    },
+    grid: {
+      vertLines: { color: "rgba(30, 41, 59, 0.6)" },
+      horzLines: { color: "rgba(30, 41, 59, 0.6)" }
+    },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+      vertLine: { color: "#475569", width: 1, style: 2 },
+      horzLine: { color: "#475569", width: 1, style: 2 }
+    },
+    rightPriceScale: {
+      borderColor: "#1e293b",
+      autoScale: true
+    },
+    timeScale: {
+      borderColor: "#1e293b",
+      timeVisible: chartTF === "1h" || chartTF === "4h",
+      secondsVisible: false
+    }
   };
 
-  const script = document.createElement("script");
-  script.type = "text/javascript";
-  script.src  = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
-  script.async = true;
-  script.innerHTML = JSON.stringify(config);
+  // 1. Ana Grafik
+  lwcMainChart = LightweightCharts.createChart(mainContainer, {
+    ...commonChartOptions,
+    width:  mainContainer.clientWidth || 900,
+    height: mainHeight
+  });
 
-  container.appendChild(script);
-  wrap.appendChild(container);
+  // Candlestick Serisi
+  lwcCandleSeries = lwcMainChart.addCandlestickSeries({
+    upColor:        "#10b981",
+    downColor:      "#ef4444",
+    borderVisible:  false,
+    wickUpColor:    "#10b981",
+    wickDownColor:  "#ef4444"
+  });
+
+  const candleData = data.map(d => ({
+    time:  d.time,
+    open:  d.open,
+    high:  d.high,
+    low:   d.low,
+    close: d.close
+  }));
+  lwcCandleSeries.setData(candleData);
+
+  // Hacim Serisi
+  lwcVolumeSeries = lwcMainChart.addHistogramSeries({
+    priceFormat:  { type: "volume" },
+    priceScaleId: "" // Overlay modunda ana pane'e bind
+  });
+  lwcVolumeSeries.priceScale().applyOptions({
+    scaleMargins: { top: 0.8, bottom: 0 }
+  });
+  const volData = data.map(d => ({
+    time:  d.time,
+    value: d.volume,
+    color: d.close >= d.open ? "rgba(16, 185, 129, 0.35)" : "rgba(239, 68, 68, 0.35)"
+  }));
+  lwcVolumeSeries.setData(volData);
+
+  // EMA Göstergeleri
+  if(showEma20){
+    lwcEma20Series = lwcMainChart.addLineSeries({
+      color: "#06b6d4",
+      lineWidth: 1.5,
+      title: "EMA20",
+      crosshairMarkerVisible: false
+    });
+    lwcEma20Series.setData(calcEMA(data, 20));
+  }
+  if(showEma50){
+    lwcEma50Series = lwcMainChart.addLineSeries({
+      color: "#f59e0b",
+      lineWidth: 1.5,
+      title: "EMA50",
+      crosshairMarkerVisible: false
+    });
+    lwcEma50Series.setData(calcEMA(data, 50));
+  }
+  if(showEma200){
+    lwcEma200Series = lwcMainChart.addLineSeries({
+      color: "#a855f7",
+      lineWidth: 2,
+      title: "EMA200",
+      crosshairMarkerVisible: false
+    });
+    lwcEma200Series.setData(calcEMA(data, 200));
+  }
+
+  // Bollinger Bands
+  if(showBb){
+    const bb = calcBB(data, 20, 2);
+    lwcBbUpperSeries = lwcMainChart.addLineSeries({
+      color: "rgba(59, 130, 246, 0.7)",
+      lineWidth: 1,
+      lineStyle: 2,
+      crosshairMarkerVisible: false
+    });
+    lwcBbMiddleSeries = lwcMainChart.addLineSeries({
+      color: "rgba(59, 130, 246, 0.4)",
+      lineWidth: 1,
+      lineStyle: 1,
+      crosshairMarkerVisible: false
+    });
+    lwcBbLowerSeries = lwcMainChart.addLineSeries({
+      color: "rgba(59, 130, 246, 0.7)",
+      lineWidth: 1,
+      lineStyle: 2,
+      crosshairMarkerVisible: false
+    });
+    lwcBbUpperSeries.setData(bb.upper);
+    lwcBbMiddleSeries.setData(bb.middle);
+    lwcBbLowerSeries.setData(bb.lower);
+  }
+
+  // 2. RSI Paneli (Varsa)
+  if(showRsi && rsiContainer){
+    lwcRsiChart = LightweightCharts.createChart(rsiContainer, {
+      ...commonChartOptions,
+      width:  rsiContainer.clientWidth || 900,
+      height: rsiHeight,
+      timeScale: {
+        ...commonChartOptions.timeScale,
+        visible: false // Zaman skalasını ana grafik yönetsin
+      }
+    });
+
+    lwcRsiSeries = lwcRsiChart.addLineSeries({
+      color: "#8b5cf6",
+      lineWidth: 1.5,
+      priceFormat: { type: "custom", formatter: v => v.toFixed(1) }
+    });
+    lwcRsiSeries.setData(calcRSI(data, 14));
+
+    // RSI 70 ve 30 Seviyeleri
+    lwcRsiSeries.createPriceLine({
+      price: 70,
+      color: "rgba(239, 68, 68, 0.6)",
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: "Aşırı Alım (70)"
+    });
+    lwcRsiSeries.createPriceLine({
+      price: 30,
+      color: "rgba(16, 185, 129, 0.6)",
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: "Aşırı Satım (30)"
+    });
+    lwcRsiSeries.createPriceLine({
+      price: 50,
+      color: "rgba(100, 116, 139, 0.4)",
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dotted,
+      axisLabelVisible: false
+    });
+
+    // Zaman eksenlerini birbirine senkronize et
+    lwcMainChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+      if(lwcRsiChart && range) lwcRsiChart.timeScale().setVisibleLogicalRange(range);
+    });
+    lwcRsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+      if(lwcMainChart && range) lwcMainChart.timeScale().setVisibleLogicalRange(range);
+    });
+  }
+
+  // Crosshair Event ile Legend Güncelleme
+  const dataByTime = new Map(data.map(d => [d.time, d]));
+  const ema20ByTime  = showEma20  ? new Map(calcEMA(data, 20).map(d => [d.time, d.value])) : null;
+  const ema50ByTime  = showEma50  ? new Map(calcEMA(data, 50).map(d => [d.time, d.value])) : null;
+  const ema200ByTime = showEma200 ? new Map(calcEMA(data, 200).map(d => [d.time, d.value])) : null;
+  const rsiByTime    = showRsi    ? new Map(calcRSI(data, 14).map(d => [d.time, d.value])) : null;
+
+  function updateLegendValues(timeVal){
+    const d = dataByTime.get(timeVal);
+    if(!d) return;
+
+    const dateStr = (chartTF === "1h" || chartTF === "4h")
+      ? new Date(d.time * 1000).toLocaleString("tr-TR", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })
+      : new Date(d.time * 1000).toLocaleDateString("tr-TR", { day:"numeric", month:"short", year:"numeric" });
+
+    document.getElementById("leg-date").textContent = dateStr;
+    document.getElementById("leg-open").textContent = d.open.toFixed(2);
+    document.getElementById("leg-high").textContent = d.high.toFixed(2);
+    document.getElementById("leg-low").textContent  = d.low.toFixed(2);
+    document.getElementById("leg-close").textContent= d.close.toFixed(2);
+
+    const diff = d.close - d.open;
+    const diffPct = d.open > 0 ? (diff / d.open) * 100 : 0;
+    const chgEl = document.getElementById("leg-chg");
+    chgEl.textContent = (diff >= 0 ? "+" : "") + diff.toFixed(2) + " (" + diffPct.toFixed(2) + "%)";
+    chgEl.className = "lwc-legend-val " + (diff >= 0 ? "c-up" : "c-down");
+
+    // Hacim Formatı
+    const v = d.volume;
+    const vStr = v >= 1e9 ? (v/1e9).toFixed(2)+"B" : v >= 1e6 ? (v/1e6).toFixed(2)+"M" : v >= 1e3 ? (v/1e3).toFixed(1)+"K" : v;
+    document.getElementById("leg-vol").textContent = vStr;
+
+    // Göstergelerin anlık değerleri
+    const indWrap = document.getElementById("leg-ind-wrap");
+    if(indWrap){
+      let indHtml = "";
+      if(showEma20 && ema20ByTime && ema20ByTime.has(d.time)){
+        indHtml += `<span style="color:#06b6d4">EMA20: <b>${ema20ByTime.get(d.time).toFixed(2)}</b></span>`;
+      }
+      if(showEma50 && ema50ByTime && ema50ByTime.has(d.time)){
+        indHtml += `<span style="color:#f59e0b">EMA50: <b>${ema50ByTime.get(d.time).toFixed(2)}</b></span>`;
+      }
+      if(showEma200 && ema200ByTime && ema200ByTime.has(d.time)){
+        indHtml += `<span style="color:#a855f7">EMA200: <b>${ema200ByTime.get(d.time).toFixed(2)}</b></span>`;
+      }
+      if(showRsi && rsiByTime && rsiByTime.has(d.time)){
+        const rVal = rsiByTime.get(d.time);
+        const rCls = rVal >= 70 ? "c-down" : rVal <= 30 ? "c-up" : "";
+        indHtml += `<span style="color:#8b5cf6">RSI: <b class="${rCls}">${rVal.toFixed(1)}</b></span>`;
+      }
+      indWrap.innerHTML = indHtml;
+    }
+  }
+
+  lwcMainChart.subscribeCrosshairMove(param => {
+    if(!param || !param.time){
+      if(data.length > 0) updateLegendValues(data[data.length - 1].time);
+      return;
+    }
+    updateLegendValues(param.time);
+  });
+
+  // İlk açılışta son bar değerlerini göster
+  if(data.length > 0){
+    updateLegendValues(data[data.length - 1].time);
+  }
+
+  // Görünümü uydur
+  lwcMainChart.timeScale().fitContent();
+
+  // Responsive Boyutlandırma
+  lwcResizeObserver = new ResizeObserver(() => {
+    if(lwcMainChart && mainContainer){
+      lwcMainChart.applyOptions({ width: mainContainer.clientWidth });
+    }
+    if(lwcRsiChart && rsiContainer){
+      lwcRsiChart.applyOptions({ width: rsiContainer.clientWidth });
+    }
+  });
+  lwcResizeObserver.observe(wrap);
 }
 
 // ═══════════════════════════════════════════════════════

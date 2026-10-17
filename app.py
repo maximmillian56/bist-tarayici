@@ -833,6 +833,72 @@ def api_test():
     except Exception as e:
         return jsonify({"error": str(e)})
 
+# ==============================================================================
+#  CHART DATA — Lightweight Charts için OHLCV endpoint
+# ==============================================================================
+@app.route("/api/chart/<symbol>")
+def api_chart(symbol):
+    """OHLCV veri döndürür. interval: 1h | 4h | 1d | 1wk  period: 5d | 1mo | 3mo | 6mo | 1y | 2y | 5y"""
+    try:
+        import yfinance as yf
+        import pandas as pd
+        import numpy as np
+
+        clean_sym = symbol.replace("BIST:", "").strip()
+        ticker_sym = clean_sym if clean_sym.endswith(".IS") else clean_sym + ".IS"
+        iv     = request.args.get("interval", "1d")
+        period = request.args.get("period",   "1y")
+
+        # 4H: yfinance desteklemez → 1H verisini resample et
+        if iv == "4h":
+            df_raw = yf.download(ticker_sym, period="60d", interval="1h",
+                                 auto_adjust=True, progress=False)
+            if df_raw.empty:
+                return jsonify({"error": "Veri bulunamadı", "data": []})
+            if isinstance(df_raw.columns, pd.MultiIndex):
+                df_raw.columns = df_raw.columns.get_level_values(0)
+            df_raw.index = pd.to_datetime(df_raw.index)
+            df = df_raw.resample("4h").agg({
+                "Open": "first", "High": "max",
+                "Low": "min",   "Close": "last", "Volume": "sum"
+            }).dropna(subset=["Open", "Close"])
+        else:
+            yf_iv = {"1h": "60m", "1d": "1d", "1wk": "1wk"}.get(iv, "1d")
+            # 1H için max 60 gün
+            if iv == "1h":
+                period = "60d"
+            df = yf.download(ticker_sym, period=period, interval=yf_iv,
+                             auto_adjust=True, progress=False)
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+
+        if df is None or df.empty:
+            return jsonify({"error": "Veri bulunamadı", "data": []})
+
+        data = []
+        for ts, row in df.iterrows():
+            try:
+                o = float(row["Open"]);  h = float(row["High"])
+                l = float(row["Low"]);   c = float(row["Close"])
+                v = int(row["Volume"]) if not np.isnan(row["Volume"]) else 0
+                if any(np.isnan(x) for x in [o, h, l, c]):
+                    continue
+                data.append({
+                    "time":   int(ts.timestamp()),
+                    "open":   round(o, 4),
+                    "high":   round(h, 4),
+                    "low":    round(l, 4),
+                    "close":  round(c, 4),
+                    "volume": v
+                })
+            except Exception:
+                continue
+
+        return jsonify({"symbol": symbol, "data": data,
+                        "interval": iv, "period": period})
+    except Exception as e:
+        return jsonify({"error": str(e), "data": []})
+
 @app.route("/api/news/<ticker>")
 def api_news(ticker):
     """
