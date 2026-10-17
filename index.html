@@ -808,30 +808,37 @@ function loadTV(){
   div.style.cssText = "width:100%;height:500px";
   wrap.appendChild(div);
 
-  const script = document.createElement("script");
-  script.type = "text/javascript";
-  script.src = "https://s3.tradingview.com/tv.js";
-  script.onload = function(){
-    if(typeof TradingView !== "undefined"){
-      new TradingView.widget({
-        "autosize": true,
-        "symbol": "BIST:"+sym,
-        "interval": chartTF,
-        "timezone": "Europe/Istanbul",
-        "theme": "dark",
-        "style": "1",
-        "locale": "tr",
-        "toolbar_bg": "#0d1220",
-        "enable_publishing": false,
-        "allow_symbol_change": true,
-        "container_id": containerId,
-        "hide_side_toolbar": false,
-      });
-    }
-  };
-  // Temizle önceki script'leri
-  document.querySelectorAll('script[src*="s3.tradingview.com/tv.js"]').forEach(s=>s.remove());
-  document.head.appendChild(script);
+  function createWidget(){
+    new TradingView.widget({
+      "autosize": true,
+      "symbol": "BIST:"+sym,
+      "interval": chartTF,
+      "timezone": "Europe/Istanbul",
+      "theme": "dark",
+      "style": "1",
+      "locale": "tr",
+      "toolbar_bg": "#0d1220",
+      "enable_publishing": false,
+      "allow_symbol_change": true,
+      "container_id": containerId,
+      "hide_side_toolbar": false,
+    });
+  }
+
+  // Eğer TradingView kütüphanesi zaten yüklüyse direkt widget oluştur
+  if(typeof TradingView !== "undefined"){
+    createWidget();
+  } else {
+    // Yoksa script'i yükle ve onload'da oluştur
+    document.querySelectorAll('script[src*="s3.tradingview.com/tv.js"]').forEach(s=>s.remove());
+    const script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src = "https://s3.tradingview.com/tv.js";
+    script.onload = function(){
+      if(typeof TradingView !== "undefined") createWidget();
+    };
+    document.head.appendChild(script);
+  }
 }
 
 // ═══════════════════════════════════════════════════════

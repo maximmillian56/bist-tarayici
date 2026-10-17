@@ -2,7 +2,7 @@
 BIST Hisse Senedi Tarayıcısı v2.1
 Direkt TradingView Scanner API (tradingview_screener kütüphanesi yok)
 """
-import os, threading, time
+import os, threading, time, json
 from datetime import datetime
 import requests
 from flask import Flask, jsonify, send_file, request
