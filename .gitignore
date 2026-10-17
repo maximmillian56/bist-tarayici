@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *.pyc
@@ -29,5 +29,13 @@ Thumbs.db
 .env
 .env.*
 
+# State & Caches
 demo_portfolio.json
 demo_portfolio.json.tmp
+seasonal_cache.json
+debug_api.json
+
+# Local exports & archives
+*.zip
+filtrelenmis_hisseler.csv
+tum_hisseler.csv

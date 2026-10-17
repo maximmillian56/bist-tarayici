@@ -1,0 +1,17 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.zip
+*.csv
+seasonal_cache.json
+debug_api.json
+.env
+.env.*
+demo_portfolio.json
+demo_portfolio.json.tmp
+.vscode
+.idea

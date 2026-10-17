@@ -9,6 +9,7 @@ AI Demo Trading — yapay zekanın sanal bakiye ile otomatik alım-satım simül
 - Kullanıcı yalnızca izler ve başlangıç bakiyesini ayarlayabilir (ayarlayınca portföy sıfırlanır).
 """
 import copy
+import hashlib
 import hmac
 import json
 import os
@@ -585,7 +586,9 @@ def _auth_error():
         return None
     body = request.get_json(silent=True) or {}
     given = request.headers.get("X-Demo-Password") or str(body.get("sifre") or "")
-    if hmac.compare_digest(given.encode("utf-8"), pw.encode("utf-8")):
+    given_d = hashlib.sha256(given.encode("utf-8")).digest()
+    pw_d = hashlib.sha256(pw.encode("utf-8")).digest()
+    if hmac.compare_digest(given_d, pw_d):
         return None
     time.sleep(1)       # kaba kuvvet denemelerini yavaşlat
     return jsonify({"error": "Şifre hatalı"}), 401

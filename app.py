@@ -2,7 +2,8 @@
 BIST Hisse Senedi Tarayıcısı v2.1
 Direkt TradingView Scanner API (tradingview_screener kütüphanesi yok)
 """
-import os, threading, time, json
+import os, threading, time, json, re
+from collections import defaultdict, deque
 from datetime import datetime
 import requests
 from flask import Flask, jsonify, send_file, request
@@ -18,6 +19,13 @@ PORT     = int(os.environ.get("PORT", 5000))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 app      = Flask(__name__)
+
+@app.after_request
+def _security_headers(resp):
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "SAMEORIGIN"
+    resp.headers["Referrer-Policy"] = "same-origin"
+    return resp
 
 # ==============================================================================
 #  TRADİNGVİEW DİREKT API
@@ -68,14 +76,14 @@ SCAN_COLUMNS = [
     "beta_1_year",
     # Günlük OHLC (günlük pivot hesabı)
     "open", "high", "low",
-    # 4 Saatlik OHLC (4H pivot)
-    "open|240", "high|240", "low|240",
+    # 4 Saatlik OHLC (4H pivot) — kapanış kolonu olmadan 4H pivot günlük fiyata düşüyordu
+    "open|240", "high|240", "low|240", "close|240",
     # Haftalık OHLC (haftalık pivot)
-    "open|1W", "high|1W", "low|1W",
+    "open|1W", "high|1W", "low|1W", "close|1W",
     # Aylık OHLC (aylık pivot)
     "High.1M", "Low.1M",
     # 1 Saatlik OHLC (1H pivot)
-    "open|60", "high|60", "low|60",
+    "open|60", "high|60", "low|60", "close|60",
     # Aylık pivot (TradingView destekler)
     "Pivot.M.Classic.S1", "Pivot.M.Classic.S2",
     "Pivot.M.Classic.R1", "Pivot.M.Classic.R2",
@@ -90,8 +98,14 @@ COL_IDX = {col: i for i, col in enumerate(SCAN_COLUMNS)}
 
 _cache = {"stocks": None, "updated_at": None, "loading": False, "error": None}
 _seasonal_cache = {"data": None, "updated_at": None, "loading": False}
+_form_cache = {
+    "data": None, "updated_at": None, "loading": False, "error": None,
+    "progress": {"done": 0, "total": 0},
+}
 _progress = {"done": 0, "total": 1000}
 _lock = threading.Lock()
+_rl = defaultdict(deque)
+_rl_lock = threading.Lock()
 
 # ==============================================================================
 #  YARDIMCI FONKSİYONLAR
@@ -112,6 +126,41 @@ def _sf(val):
 def _sr(val, n=2):
     f = _sf(val)
     return round(f, n) if f is not None else None
+
+def _client_ip():
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+def _rate_limited(bucket, max_n, window_s):
+    """True ise istek reddedilmeli. bucket örn. 'chat:1.2.3.4'."""
+    now = time.time()
+    with _rl_lock:
+        q = _rl[bucket]
+        while q and q[0] < now - window_s:
+            q.popleft()
+        if len(q) >= max_n:
+            return True
+        q.append(now)
+        return False
+
+def _clean_symbol(raw):
+    """Grafik/haber için güvenli BIST sembolü (örn. THYAO.IS)."""
+    s = str(raw or "").replace("BIST:", "").strip().upper()
+    s = s.replace(".IS", "")
+    if not re.fullmatch(r"[A-Z0-9]{2,8}", s):
+        return None
+    return s + ".IS"
+
+def _is_cloud():
+    return bool(
+        os.environ.get("RENDER")
+        or os.environ.get("RAILWAY_ENVIRONMENT")
+        or os.environ.get("HEROKU_APP_NAME")
+        or os.environ.get("FLY_APP_NAME")
+        or os.environ.get("RENDER_EXTERNAL_URL")
+    )
 
 def _signal(recommend):
     if recommend is None:
@@ -168,7 +217,6 @@ INDUSTRY_MAP = {
     "Food: Major Diversified":    "gida",
     "Food: Meat/Fish/Dairy":      "gida",
     "Food: Specialty/Candy":      "gida",
-    "Food Retail":                "gida",
     "Food Distributors":          "gida",
     "Beverages: Alcoholic":       "gida",
     "Beverages: Non-Alcoholic":   "gida",
@@ -282,40 +330,54 @@ def _map_sector(sector_raw, industry_raw=None):
 
 
 # ==============================================================================
-#  BIST 100 LİSTESİ (Sabit — Güncelleme: Ağustos 2026)
+#  BIST 100 LİSTESİ (XU100 — kaynak: 16 Ekim 2026 bileşen özeti)
 # ==============================================================================
 
 BIST100 = [
-    "THYAO","GARAN","ASELS","EREGL","KCHOL","SAHOL","AKBNK","ISCTR","SISE","TOASO",
-    "FROTO","PGSUS","BIMAS","MGROS","TCELL","TURSG","ENKAI","PETKM","ARCLK","TUPRS",
-    "SOKM","HALKB","VAKBN","YKBNK","SASA","TAVHL","CIMSA","LOGO","AEFES","EKGYO",
-    "ALARK","TTKOM","DOHOL","VESTL","OTKAR","TKFEN","TSKB","KRDMD","ENJSA","AKENR",
-    "SELEC","AKSEN","KONTR","GUBRF","OYAKC","BRSAN","ISFIN","AKFGY","AGHOL","TTRAK",
-    "SODA","KOZAL","KERVT","MPARK","ZOREN","HLGYO","IHLGM","TRGYO","ULAS","BTCIM",
-    "CEMTS","ULKER","TMSN","ALKIM","EGEEN","INDES","DOAS","BERA","ODAS","GENIL",
-    "ISDMR","KAREL","KOPOL","KLRHO","MIPAZ","NETAS","PRKAB","RYSAS","SNPAM","ULUSE",
-    "YATAS","YESIL","YGYO","ZEDUR","ADANA","ADEL","AKGRT","ALCO","ALTINS","ANFAS",
-    "ASUZU","ATAGY","ATAKP","ATEKS","ATLAS","AVSA","AYEN","AZTEK","BAGFS","BAKAB",
+    "ASELS","TUPRS","BIMAS","THYAO","AKBNK","EREGL","YKBNK","KCHOL","ISCTR","SAHOL",
+    "TCELL","GARAN","ASTOR","ENKAI","SISE","CCOLA","TAVHL","FROTO","MGROS","SASA",
+    "TRALT","EKGYO","MPARK","AEFES","TOASO","KRDMD","PGSUS","ENERY","GUBRF","HALKB",
+    "ENJSA","TURSG","PETKM","GLYHO","TTKOM","AGHOL","MAVI","TRMET","VAKBN","BRSAN",
+    "TRGYO","AHGAZ","OYAKC","AKSEN","SOKM","RGYAS","DOHOL","TABGD","TKFEN","ANSGR",
+    "ALARK","AYGAZ","RYSAS","CIMSA","ULKER","AKSA","CVKMD","ISMEN","DOAS","GLRMK",
+    "TSKB","OTKAR","ARCLK","HEKTS","TTRAK","ISDMR","TRENJ","ALBRK","ANHYT","CANTE",
+    "ECILC","CWENE","AKFYE","BTCIM","TCKRC","GRSEL","SNGYO","ODAS","FENER","EGEEN",
+    "BRYAT","BERA","KCAER","TUKAS","ECZYT","ALTNY","PAHOL","EGGUB","ENTRA","LMKDC",
+    "OBAMS","GWIND","ZOREN","KORDS","KARSN","EUREN","VESTL","BINHO","KATMR","AKCNS",
 ]
 BIST100_SET = set(t + ".IS" for t in BIST100)
 
 # ==============================================================================
-#  XKTUM — BIST KATİLIM 100 ENDEKSİ (Sabit Liste — Eylül 2026)
+#  XKTUM — BIST KATILIM TÜM (filtre etiketi ile aynı endeks)
+#  Kaynak: Borsa İstanbul Katılım Tüm, Mayıs–Eylül 2026 dönemi listesi.
+#  Ekim 2026 revizyonu resmi siteden doğrulanınca bu liste güncellenmeli.
 # ==============================================================================
-# Faizli geliri toplam gelirin %5'inden az olan, Katılım finans kurallarına
-# uyan şirketler. Kaynak: BIST Katılım Endeksi bileşenleri.
 
 XKTUM = [
-    "THYAO","ASELS","EREGL","KCHOL","TOASO","FROTO","PGSUS","BIMAS","ARCLK","TUPRS",
-    "SOKM","SASA","TAVHL","CIMSA","LOGO","ALARK","DOHOL","VESTL","OTKAR","TKFEN",
-    "KRDMD","ENJSA","AKENR","SELEC","AKSEN","KONTR","GUBRF","OYAKC","BRSAN","TTRAK",
-    "SODA","KOZAL","KERVT","MPARK","ZOREN","IHLGM","ULAS","BTCIM","CEMTS","ULKER",
-    "TMSN","ALKIM","EGEEN","INDES","DOAS","BERA","ODAS","GENIL","ISDMR","KAREL",
-    "KOPOL","KLRHO","MIPAZ","NETAS","PRKAB","RYSAS","SNPAM","ULUSE","YATAS","YESIL",
-    "ADANA","ADEL","ALCO","ALTINS","ANFAS","ASUZU","ATAKP","ATEKS","AVSA","AYEN",
-    "BAGFS","BAKAB","BFREN","BIOEN","BOSSA","BRKO","BURCE","CEMAS","CIMSA","CWENE",
-    "DEVA","DGKLB","DYOBY","ECILC","ECZYT","EDIP","EGGUB","EGPRO","EMKEL","ENERY",
-    "FMIZP","GESAN","GLYHO","GOODY","GRSEL","GSDHO","GUBRF","HATEK","HEKTS","HLGYO",
+    "AAGYO","ACSEL","AHGAZ","AHSGY","AKFYE","AKHAN","ALBRK","ALCTL","ALFAS","ALKA",
+    "ALKIM","ALKLC","ALTNY","ALVES","ANGEN","ARASE","ARDYZ","ARENA","ARFYE","ASELS",
+    "ATAKP","ATATP","AVPGY","AYEN","BAHKM","BAKAB","BASGZ","BAYRK","BEGYO","BERA",
+    "BESTE","BIENY","BIMAS","BINBN","BINHO","BMSTL","BORSK","BOSSA","BRISA","BRKSN",
+    "BRLSM","BSOKE","BUCIM","BURCE","BURVA","BYDNR","CANTE","CATES","CELHA","CEMTS",
+    "CEMZY","CIMSA","CMBTN","COSMO","CVKMD","CWENE","DAPGM","DARDL","DCTTR","DENGE",
+    "DESPC","DGATE","DITAS","DMSAS","DNISI","DOFER","DOFRB","DOGUB","DYOBY","EBEBK",
+    "EDATA","EDIP","EFOR","EGEPO","EGGUB","EGPRO","EKGYO","EKSUN","ELITE","EMPAE",
+    "ENJSA","EREGL","ESCOM","EUPWR","EYGYO","FADE","FONET","FORMT","FORTE","FRMPL",
+    "FZLGY","GEDZA","GENIL","GENKM","GENTS","GEREL","GESAN","GLRMK","GMTAS","GOKNR",
+    "GOLTS","GOODY","GRSEL","GRTHO","GUBRF","GUNDG","HATSN","HKTM","HOROZ","HRKET",
+    "IDGYO","IHEVA","IHLAS","IHLGM","IHYAY","IMASM","INGRM","INTEM","ISDMR","IZFAS",
+    "IZINV","JANTS","KARSN","KATMR","KBORU","KCAER","KIMMR","KLSER","KLSYN","KMPUR",
+    "KNFRT","KOCMT","KONKA","KONYA","KOPOL","KOTON","KRDMA","KRDMB","KRDMD","KRGYO",
+    "KRONT","KRPLS","KRSTL","KRVGD","KTLEV","KUTPO","KZBGY","LKMNH","LMKDC","LOGO",
+    "LXGYO","MAGEN","MAKIM","MARBL","MAVI","MCARD","MEDTR","MEGMT","MEKAG","MERCN",
+    "MERKO","MEYSU","MNDTR","MOBTL","MOPAS","MPARK","NETAS","NETCD","NTGAZ","OBAMS",
+    "OBASE","ONCSM","ORGE","OSTIM","OZATD","OZGYO","OZRDN","OZYSR","PAGYO","PARSN",
+    "PASEU","PENGD","PENTA","PETKM","PKART","PLTUR","PNSUT","POLHO","PRKME","QUAGR",
+    "RALYH","RGYAS","RNPOL","RODRG","RUBNS","SAFKR","SAMAT","SANEL","SANKO","SARKY",
+    "SAYAS","SDTTR","SEKUR","SELEC","SELVA","SILVR","SMART","SNGYO","SNICA","SOKE",
+    "SRVGY","SUNTK","SURGY","SUWEN","TARKM","TEZOL","TKFEN","TKNSA","TMPOL","TUCLK",
+    "TUKAS","TUPRS","TUREX","TURGG","UCAYM","UFUK","ULUSE","USAK","VAKKO","VANGD",
+    "YATAS","YEOTK","YIGIT","YKSLN","YUNSA","ZEDUR","ZERGY",
 ]
 XKTUM_SET = set(t + ".IS" for t in XKTUM)
 
@@ -365,16 +427,26 @@ def _fetch():
             }
             print(f"POST {SCAN_URL} range=[{offset},{offset+batch}]", flush=True)
 
-            r = requests.post(
-                SCAN_URL,
-                json=payload,
-                headers=SCAN_HEADERS,
-                timeout=(10, 30),   # (connect_timeout, read_timeout)
-            )
-            print(f"HTTP {r.status_code} — {len(r.content)} bytes", flush=True)
-            r.raise_for_status()
+            resp_data = None
+            for attempt in range(3):
+                try:
+                    r = requests.post(
+                        SCAN_URL,
+                        json=payload,
+                        headers=SCAN_HEADERS,
+                        timeout=(10, 30),
+                    )
+                    r.raise_for_status()
+                    resp_data = r.json()
+                    print(f"HTTP {r.status_code} — {len(r.content)} bytes", flush=True)
+                    break
+                except Exception as req_err:
+                    print(f"TradingView scan attempt {attempt+1} failed: {req_err}", flush=True)
+                    time.sleep(2)
+            if not resp_data:
+                raise RuntimeError("TradingView scanner verisi 3 denemede alinamadi")
 
-            data       = r.json()
+            data       = resp_data
             rows       = data.get("data", [])
             total_cnt  = data.get("totalCount", 0)
 
@@ -399,7 +471,7 @@ def _fetch():
 
                 def _pivot(h, l, c):
                     """Klasik pivot noktası hesabı: P=(H+L+C)/3"""
-                    if not (h and l and c):
+                    if h is None or l is None or c is None:
                         return None, None, None, None, None
                     p  = (h + l + c) / 3
                     s1 = round(2*p - h, 2)
@@ -547,7 +619,6 @@ def _fetch():
                     "brut_kar_marji": brut_kar_marji,
                     "favok":         favok_val,
                     "ev_favok":      ev_favok,
-                    "favok_oz_kaynak": favok_oz_kaynak,  # Gerçekte FAVÖK/Gelir (EBITDA marjı)
                     "net_kar":       net_kar,
                     "net_kar_fq":    net_kar_fq,
                      "net_kar_fq_prev": net_kar_fq_prev,
@@ -646,18 +717,7 @@ def _fetch():
 #  MEVSİMSEL (Sadece lokal)
 # ==============================================================================
 
-TOP_50 = [
-    "THYAO.IS","GARAN.IS","ASELS.IS","EREGL.IS","KCHOL.IS",
-    "SAHOL.IS","AKBNK.IS","ISCTR.IS","SISE.IS","TOASO.IS",
-    "FROTO.IS","PGSUS.IS","BIMAS.IS","MGROS.IS","TCELL.IS",
-    "TURSG.IS","ENKAI.IS","PETKM.IS","ARCLK.IS","TUPRS.IS",
-    "SOKM.IS","HALKB.IS","VAKBN.IS","YKBNK.IS","SASA.IS",
-    "TAVHL.IS","CIMSA.IS","LOGO.IS","AEFES.IS","EKGYO.IS",
-    "ALARK.IS","TTKOM.IS","DOHOL.IS","VESTL.IS","OTKAR.IS",
-    "TKFEN.IS","TSKB.IS","KRDMD.IS","ENJSA.IS","AKENR.IS",
-    "SELEC.IS","AKSEN.IS","KONTR.IS","GUBRF.IS","OYAKC.IS",
-    "BRSAN.IS","ISFIN.IS","AKFGY.IS","AGHOL.IS","TTRAK.IS",
-]
+TOP_50 = [t + ".IS" for t in BIST100[:50]]
 MONTHS_TR = ["Oca","Sub","Mar","Nis","May","Haz","Tem","Agu","Eyl","Eki","Kas","Ara"]
 SEASONAL_CACHE_FILE = os.path.join(os.path.dirname(__file__), "seasonal_cache.json")
 
@@ -668,13 +728,7 @@ def _fetch_seasonal():
     Disk cache ile restart sonrası anında yüklenir.
     """
     # Render / bulut ortamında atla
-    is_cloud = (
-        os.environ.get("RENDER") or
-        os.environ.get("RAILWAY_ENVIRONMENT") or
-        os.environ.get("HEROKU_APP_NAME") or
-        os.environ.get("FLY_APP_NAME")
-    )
-    if is_cloud:
+    if _is_cloud():
         print("Bulut ortami: mevsimsel analiz atlaniyor.", flush=True)
         with _lock:
             _seasonal_cache["data"]    = {}
@@ -808,6 +862,9 @@ def api_seasonal():
 
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
+    ip = _client_ip()
+    if _rate_limited(f"refresh:{ip}", 1, 120) or _rate_limited("refresh:global", 2, 120):
+        return jsonify({"error": "Yenileme çok sık. 2 dakika bekleyin."}), 429
     with _lock:
         if _cache["loading"]:
             return jsonify({"status": "already_loading"})
@@ -818,7 +875,9 @@ def api_refresh():
 
 @app.route("/api/test")
 def api_test():
-    """Render'da TradingView bağlantısını test et"""
+    """Sadece ALLOW_API_TEST=1 iken açık — production'da kapalı."""
+    if os.environ.get("ALLOW_API_TEST") != "1":
+        return jsonify({"error": "Kapalı"}), 404
     try:
         r = requests.post(
             SCAN_URL,
@@ -844,10 +903,17 @@ def api_chart(symbol):
         import pandas as pd
         import numpy as np
 
-        clean_sym = symbol.replace("BIST:", "").strip()
-        ticker_sym = clean_sym if clean_sym.endswith(".IS") else clean_sym + ".IS"
+        ticker_sym = _clean_symbol(symbol)
+        if not ticker_sym:
+            return jsonify({"error": "Geçersiz sembol", "data": []}), 400
+        allowed_iv = {"1h", "4h", "1d", "1wk"}
+        allowed_period = {"5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "60d"}
         iv     = request.args.get("interval", "1d")
         period = request.args.get("period",   "1y")
+        if iv not in allowed_iv:
+            iv = "1d"
+        if period not in allowed_period:
+            period = "1y"
 
         # 4H: yfinance desteklemez → 1H verisini resample et
         if iv == "4h":
@@ -901,27 +967,15 @@ def api_chart(symbol):
 
 @app.route("/api/news/<ticker>")
 def api_news(ticker):
-    """
-    KAP.org.tr haber sentiment endpoint.
-    Şu an placeholder — ileride gerçek KAP scraping eklenecek.
-    Dönüş: {"ticker": "GARAN", "sentiment": "iyi|notr|kotu", "news": [...]}
-    """
-    # Placeholder: rastgele ama tutarlı sentiment (ticker hash'e göre)
-    import hashlib
-    h = int(hashlib.md5(ticker.encode()).hexdigest(), 16) % 3
-    sentiments = ["iyi", "notr", "kotu"]
-    sentiment  = sentiments[h]
-    badge_map  = {"iyi": "🟢 İyi", "notr": "🟡 Nötr", "kotu": "🔴 Kötü"}
-    placeholder_news = [
-        {"tarih": "2026-08-15", "baslik": "KAP haberleri yakında entegre edilecek", "sentiment": "notr"},
-        {"tarih": "2026-08-01", "baslik": "Otomatik KAP tarama aktif değil", "sentiment": "notr"},
-    ]
+    """KAP haberleri henüz yok — sahte 'iyi/kötü' sinyali üretilmez."""
+    clean = _clean_symbol(ticker)
+    code = (clean or "—").replace(".IS", "")
     return jsonify({
-        "ticker":    ticker.upper().replace(".IS",""),
-        "sentiment": sentiment,
-        "badge":     badge_map.get(sentiment, "—"),
-        "news":      placeholder_news,
-        "kaynak":    "placeholder — KAP entegrasyonu yapılacak",
+        "ticker":    code,
+        "sentiment": None,
+        "badge":     "KAP yok",
+        "news":      [],
+        "kaynak":    "KAP entegrasyonu yok; rastgele sentiment gösterilmez",
     })
 
 # ==============================================================================
@@ -1021,80 +1075,164 @@ def _detect_formations(candles):
 
     return formations
 
-@app.route("/api/formations")
-def api_formations():
-    """Tüm hisselerin formasyon analizini döner — cache'deki veriden hesaplanır."""
+def _ohlc_candles(df):
+    import pandas as pd
+    if df is None or getattr(df, "empty", True):
+        return []
+    if isinstance(df.columns, pd.MultiIndex):
+        df = df.copy()
+        df.columns = df.columns.get_level_values(0)
+    needed = ("Open", "High", "Low", "Close")
+    if any(c not in df.columns for c in needed):
+        return []
+    candles = []
+    for _, row in df.iterrows():
+        try:
+            o, h, l, c = float(row["Open"]), float(row["High"]), float(row["Low"]), float(row["Close"])
+            if any(x != x for x in (o, h, l, c)):
+                continue
+            candles.append({"o": o, "h": h, "l": l, "c": c})
+        except Exception:
+            continue
+    return candles
+
+
+def _slice_ticker(hist, ticker):
+    import pandas as pd
+    if hist is None or getattr(hist, "empty", True):
+        return None
+    if isinstance(hist.columns, pd.MultiIndex):
+        try:
+            return hist[ticker]
+        except KeyError:
+            return None
+    return hist
+
+
+def _fetch_formations():
+    """BIST100 için toplu yfinance indirme — istek başına 100×3 çağrı yok."""
     import yfinance as yf
+    import pandas as pd
 
     with _lock:
-        stocks = _cache.get("stocks") or []
+        if _form_cache["loading"]:
+            return
+        _form_cache["loading"] = True
+        _form_cache["error"] = None
+        stocks = list(_cache.get("stocks") or [])
 
-    if not stocks:
-        return jsonify({"error": "Henüz hisse verisi yüklenmedi", "data": []})
+    try:
+        bist_stocks = [s for s in stocks if s.get("is_bist100")]
+        if not bist_stocks:
+            bist_stocks = sorted(stocks, key=lambda x: x.get("piyasa_degeri") or 0, reverse=True)[:100]
+        if not bist_stocks:
+            raise RuntimeError("Henüz hisse verisi yüklenmedi")
 
-    # Sadece BIST100 veya en işlem gören 100 hisseyi tara (performans için)
-    bist_stocks = [s for s in stocks if s.get("is_bist100")]
-    if not bist_stocks:
-        bist_stocks = sorted(stocks, key=lambda x: x.get("piyasa_degeri") or 0, reverse=True)[:100]
+        tickers = [s["sembol"] if str(s["sembol"]).endswith(".IS") else str(s["sembol"]) + ".IS"
+                   for s in bist_stocks]
+        tickers_str = " ".join(tickers)
+        meta = {s["sembol"].replace(".IS", ""): s for s in bist_stocks}
 
-    results = []
-    timeframes = {"1h": "60m", "4h": "60m", "1d": "1d"}
-    periods = {"1h": "5d", "4h": "30d", "1d": "60d"}
+        with _lock:
+            _form_cache["progress"] = {"done": 0, "total": 3}
 
-    for s in bist_stocks:
-        ticker = s["sembol"].replace(".IS", "") + ".IS"
-        try:
-            stk = yf.Ticker(ticker)
+        hist_1d = yf.download(tickers_str, period="60d", interval="1d",
+                              auto_adjust=True, progress=False, group_by="ticker", threads=True)
+        with _lock:
+            _form_cache["progress"]["done"] = 1
+        hist_1h = yf.download(tickers_str, period="30d", interval="60m",
+                              auto_adjust=True, progress=False, group_by="ticker", threads=True)
+        with _lock:
+            _form_cache["progress"]["done"] = 2
+
+        results = []
+        for ticker in tickers:
+            code = ticker.replace(".IS", "")
+            s = meta.get(code) or {}
             stock_formations = []
-
-            for tf_label, interval in timeframes.items():
-                try:
-                    hist = stk.history(period=periods[tf_label], interval=interval)
-                    if hist.empty or len(hist) < 5:
+            try:
+                d1 = _slice_ticker(hist_1d, ticker)
+                h1 = _slice_ticker(hist_1h, ticker)
+                for tf_label, df in (("1d", d1), ("1h", h1)):
+                    candles = _ohlc_candles(df)
+                    if len(candles) < 5:
                         continue
-
-                    candles = [{"o": row["Open"], "h": row["High"], "l": row["Low"], "c": row["Close"]}
-                               for _, row in hist.iterrows()]
-
-                    # 4H: 60dk verileri 4'erli grupla
-                    if tf_label == "4h":
-                        grouped = []
-                        for j in range(0, len(candles) - 3, 4):
-                            chunk = candles[j:j+4]
-                            grouped.append({
-                                "o": chunk[0]["o"],
-                                "h": max(x["h"] for x in chunk),
-                                "l": min(x["l"] for x in chunk),
-                                "c": chunk[-1]["c"],
-                            })
-                        candles = grouped
-
-                    fms = _detect_formations(candles)
-                    for f in fms:
+                    for f in _detect_formations(candles):
                         f["zaman_dilimi"] = tf_label
                         f["fiyat"] = s.get("fiyat")
                         stock_formations.append(f)
-                except Exception:
-                    continue
-
+                if h1 is not None and not getattr(h1, "empty", True):
+                    hh = h1.copy()
+                    if isinstance(hh.columns, pd.MultiIndex):
+                        hh.columns = hh.columns.get_level_values(0)
+                    if all(c in hh.columns for c in ("Open", "High", "Low", "Close")):
+                        hh.index = pd.to_datetime(hh.index)
+                        h4 = hh.resample("4h").agg({
+                            "Open": "first", "High": "max", "Low": "min", "Close": "last"
+                        }).dropna(subset=["Open", "Close"])
+                        candles_4h = _ohlc_candles(h4)
+                        if len(candles_4h) >= 5:
+                            for f in _detect_formations(candles_4h):
+                                f["zaman_dilimi"] = "4h"
+                                f["fiyat"] = s.get("fiyat")
+                                stock_formations.append(f)
+            except Exception:
+                continue
             if stock_formations:
                 results.append({
-                    "sembol": s["sembol"].replace(".IS", ""),
+                    "sembol": code,
                     "ad": s.get("ad", ""),
                     "fiyat": s.get("fiyat"),
                     "degisim": s.get("degisim"),
                     "formasyonlar": stock_formations,
                 })
 
-        except Exception:
-            continue
+        for r in results:
+            r["max_kar"] = max(f["kar_orani"] for f in r["formasyonlar"]) if r["formasyonlar"] else 0
+        results.sort(key=lambda x: x["max_kar"], reverse=True)
 
-    # Kar oranına göre sırala (en yüksek kâr potansiyeli üstte)
-    for r in results:
-        r["max_kar"] = max(f["kar_orani"] for f in r["formasyonlar"]) if r["formasyonlar"] else 0
-    results.sort(key=lambda x: x["max_kar"], reverse=True)
+        with _lock:
+            _form_cache["data"] = results
+            _form_cache["updated_at"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+            _form_cache["progress"]["done"] = 3
+            _form_cache["error"] = None
+    except Exception as exc:
+        import traceback
+        print("Formations error:", traceback.format_exc(), flush=True)
+        with _lock:
+            _form_cache["error"] = str(exc)
+    finally:
+        with _lock:
+            _form_cache["loading"] = False
 
-    return jsonify({"data": results, "toplam": len(results)})
+
+@app.route("/api/formations")
+def api_formations():
+    """Önbellekteki formasyon sonucu. Tarama GET üzerinde yapılmaz."""
+    with _lock:
+        return jsonify({
+            "data": _form_cache["data"] or [],
+            "toplam": len(_form_cache["data"] or []),
+            "loading": _form_cache["loading"],
+            "error": _form_cache["error"],
+            "updated_at": _form_cache["updated_at"],
+            "progress": _form_cache["progress"],
+        })
+
+
+@app.route("/api/formations/refresh", methods=["POST"])
+def api_formations_refresh():
+    ip = _client_ip()
+    if _rate_limited(f"form:{ip}", 1, 180) or _rate_limited("form:global", 2, 180):
+        return jsonify({"error": "Formasyon taraması çok sık. 3 dakika bekleyin."}), 429
+    with _lock:
+        stocks = _cache.get("stocks") or []
+        if not stocks:
+            return jsonify({"error": "Henüz hisse verisi yüklenmedi"}), 409
+        if _form_cache["loading"]:
+            return jsonify({"status": "already_loading"})
+    threading.Thread(target=_fetch_formations, daemon=True).start()
+    return jsonify({"status": "started"})
 
 
 # ==============================================================================
@@ -1107,9 +1245,16 @@ def api_daily_report():
     if not GEMINI_API_KEY:
         return jsonify({"error": "GEMINI_API_KEY ayarlanmamış"}), 500
 
+    ip = _client_ip()
+    if _rate_limited(f"report:{ip}", 3, 300):
+        return jsonify({"error": "Rapor limiti: 5 dakikada en fazla 3 istek."}), 429
+
     try:
-        body = request.get_json(force=True)
+        body = request.get_json(silent=True) or {}
         fav_list = body.get("favorites", [])
+        if not isinstance(fav_list, list):
+            return jsonify({"error": "Geçersiz favori listesi"}), 400
+        fav_list = [str(x).upper().replace(".IS", "")[:8] for x in fav_list][:15]
 
         if not fav_list:
             return jsonify({"error": "Favori listesi boş"}), 400
@@ -1229,7 +1374,6 @@ def _build_stock_context(ticker=None):
             lines.append(f"Pivot Günlük — Destek1: {s.get('s1_d','—')}, Pivot: {s.get('pivot_mid_d','—')}, Direnç1: {s.get('r1_d','—')}")
             lines.append(f"Pivot Haftalık — Destek1: {s.get('s1_w','—')}, Pivot: {s.get('pivot_mid_w','—')}, Direnç1: {s.get('r1_w','—')}")
             lines.append(f"Pivot Aylık — Destek1: {s.get('s1_m','—')}, Direnç1: {s.get('r1_m','—')}")
-            lines.append(f"Pivot 6 Aylık — Destek1: {s.get('s1_6m','—')}, Direnç1: {s.get('r1_6m','—')}")
             lines.append(f"BIST100: {'Evet' if s.get('is_bist100') else 'Hayır'}, XKTUM: {'Evet' if s.get('is_xktum') else 'Hayır'}")
             lines.append(f"Son Çeyrekte Kâr mı: {'Evet' if s.get('ceyrek_karda') else 'Hayır'}")
             lines.append(f"Kâra Geçti (TTM+): {'Evet' if s.get('kara_gecti') else 'Hayır'}")
@@ -1256,14 +1400,18 @@ def api_chat():
     """Gemini AI chat — genel asistan + BIST verileri."""
     if not GEMINI_API_KEY:
         return jsonify({"error": "GEMINI_API_KEY environment variable ayarlanmamış."}), 500
+    ip = _client_ip()
+    if _rate_limited(f"chat:{ip}", 8, 60) or _rate_limited(f"chat-h:{ip}", 40, 3600):
+        return jsonify({"error": "Çok fazla mesaj. Biraz bekleyin."}), 429
     try:
-        body = request.get_json(force=True)
+        body = request.get_json(silent=True) or {}
         user_msg = (body.get("message") or "").strip()
         if not user_msg:
             return jsonify({"error": "Mesaj boş"}), 400
+        if len(user_msg) > 2000:
+            return jsonify({"error": "Mesaj çok uzun (en fazla 2000 karakter)."}), 400
 
         # Mesajdan hisse sembollerini bul (birden fazla olabilir)
-        import re
         words = re.findall(r'\b[A-ZÇĞİÖŞÜa-zçğışöüü]{3,6}\b', user_msg.upper())
         with _lock:
             stocks = _cache.get("stocks") or []

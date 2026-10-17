@@ -554,7 +554,7 @@ tr.is-fav{background:rgba(245,158,11,.04)}
     <div id="formasyon-content">
       <div style="text-align:center;padding:40px;color:var(--muted)">
         <p style="font-size:14px">🔍 Formasyonları taramak için <b>"🔄 Tara"</b> butonuna tıklayın</p>
-        <p style="font-size:11px;margin-top:8px">BIST100 hisseleri 1 saatlik, 4 saatlik ve günlük grafiklerde analiz edilir (~1-2 dk)</p>
+        <p style="font-size:11px;margin-top:8px">BIST100 hisseleri arka planda taranır; sonuç önbelleğe alınır</p>
       </div>
     </div>
   </div>
@@ -848,10 +848,11 @@ function openChart(ticker, name){
 
   loadLwcChart();
 
-  fetch("/api/news/" + sym).then(r => r.json()).then(d => {
+  fetch("/api/news/" + encodeURIComponent(sym)).then(r => r.json()).then(d => {
     const cls = d.sentiment === "iyi" ? "news-iyi" : d.sentiment === "kotu" ? "news-kotu" : "news-notr";
-    nb.textContent = "📰 " + (d.badge || "—"); nb.className = "news-badge " + cls;
-    nb.title = "KAP Haber Sentiment — " + d.kaynak;
+    nb.textContent = "📰 " + (d.badge || "KAP yok");
+    nb.className = "news-badge " + cls;
+    nb.title = d.kaynak || "KAP entegrasyonu yok";
   }).catch(() => { nb.textContent = ""; });
 }
 
@@ -1520,8 +1521,8 @@ function renderGenel(data){
     const isFav = favorites.has(s.sembol);
     return `
     <tr class="${isFav?'is-fav':''}">
-      <td class="ticker" onclick="openChart('${s.sembol}','${esc(s.ad)}')">${s.sembol.replace(".IS","")}</td>
-      <td class="nm" title="${s.ad||""}">${s.ad||""}</td>
+      <td class="ticker" onclick="openChart('${escHtml(s.sembol)}','${escHtml(s.ad)}')">${escHtml(s.sembol.replace(".IS",""))}</td>
+      <td class="nm" title="${escHtml(s.ad||"")}">${escHtml(s.ad||"")}</td>
       <td>${fmt(s.fiyat,2)}</td>
       <td>${fmtChg(s.degisim)}</td>
       <td>${fmt(s.fk,2)}</td>
@@ -1531,7 +1532,7 @@ function renderGenel(data){
       <td>${fmtPct(s.perf_1y)}</td>
       <td>${s.signal?fmtBadge(s.signal):NA}${isIdeal(s)?'<span class="badge ideal" style="margin-left:3px">⭐</span>':''}</td>
       <td>${fmtBadges(s)}</td>
-      <td><button class="fav-star ${isFav?'active':''}" onclick="toggleFav('${s.sembol}')" title="${isFav?'Favorilerden çıkar':'Favorilere ekle'}">${isFav?'★':'☆'}</button></td>
+      <td><button class="fav-star ${isFav?'active':''}" onclick="toggleFav('${escHtml(s.sembol)}')" title="${isFav?'Favorilerden çıkar':'Favorilere ekle'}">${isFav?'★':'☆'}</button></td>
     </tr>`;
   }).join("");
 }
@@ -1540,7 +1541,7 @@ function renderTemel(data){
   document.getElementById("cnt-temel").textContent=data.length+" hisse";
   document.getElementById("tbody-temel").innerHTML=data.map(s=>`
     <tr>
-      <td class="ticker" onclick="openChart('${s.sembol}','${esc(s.ad)}')">${s.sembol.replace(".IS","")}</td>
+      <td class="ticker" onclick="openChart('${escHtml(s.sembol)}','${escHtml(s.ad)}')">${escHtml(s.sembol.replace(".IS",""))}</td>
       <td>${fmt(s.fk,2)}</td>
       <td>${fmt(s.pd_dd,2)}</td>
       <td>${fmt(s.ps,2)}</td>
@@ -1566,7 +1567,7 @@ function renderTeknik(data){
     const hval=s[hacimView]; const hdisp=hval!=null?fmtNum(hval):NA;
     const hsig=s.hacim_sinyal&&s.hacim_sinyal.label!=="—"?`<span class="badge ${s.hacim_sinyal.cls}">${s.hacim_sinyal.icon} ${s.hacim_sinyal.label}</span>`:NA;
     return `<tr>
-      <td class="ticker" onclick="openChart('${s.sembol}','${esc(s.ad)}')">${s.sembol.replace(".IS","")}</td>
+      <td class="ticker" onclick="openChart('${escHtml(s.sembol)}','${escHtml(s.ad)}')">${escHtml(s.sembol.replace(".IS",""))}</td>
       <td>${fmt(s.fiyat,2)}</td>
       <td>${s.signal?fmtBadge(s.signal):NA}</td>
       <td>${s.recommend_ma!=null?fmtBadge(sigFromVal(s.recommend_ma)):NA}</td>
@@ -1588,7 +1589,7 @@ function renderGostergeler(data){
   document.getElementById("tbody-gostergeler").innerHTML=data.map(s=>{
     const hsig=s.hacim_sinyal&&s.hacim_sinyal.label!=="—"?`<span class="badge ${s.hacim_sinyal.cls}">${s.hacim_sinyal.icon} ${s.hacim_sinyal.label}</span>`:NA;
     return `<tr>
-      <td class="ticker" onclick="openChart('${s.sembol}','${esc(s.ad)}')">${s.sembol.replace(".IS","")}</td>
+      <td class="ticker" onclick="openChart('${escHtml(s.sembol)}','${escHtml(s.ad)}')">${escHtml(s.sembol.replace(".IS",""))}</td>
       <td>${fmt(s.fiyat,2)}</td>
       <td>${fmtEma(s.ema25_ustu,s.ema25)}</td>
       <td>${fmtEma(s.ema50_ustu,s.ema50)}</td>
@@ -1610,7 +1611,7 @@ function renderDestek(data){
     const pv=getPivot(s);
     const nb=s.destek_yakin?'<span class="near-badge">⭐ YAKIN</span>':'';
     return `<tr>
-      <td class="ticker" onclick="openChart('${s.sembol}','${esc(s.ad)}')">${s.sembol.replace(".IS","")}</td>
+      <td class="ticker" onclick="openChart('${escHtml(s.sembol)}','${escHtml(s.ad)}')">${escHtml(s.sembol.replace(".IS",""))}</td>
       <td>${fmt(s.fiyat,2)}</td>
       <td class="sr-s">${pv.s2!=null?pv.s2.toFixed(2):"—"}</td>
       <td class="sr-s">${pv.s1!=null?pv.s1.toFixed(2):"—"}</td>
@@ -1644,7 +1645,7 @@ function renderSeasonal(){
       return `<td class="${cls}">${v>0?"+":""}${v.toFixed(1)}%</td>`;
     }).join("");
     const nm=(allStocks.find(s=>s.sembol===tk)||{}).ad||"";
-    return `<tr><td onclick="openChart('${tk}','${nm.replace(/'/g,"")}')" title="Grafik aç">${tk.replace(".IS","")}</td>${cells}</tr>`;
+    return `<tr><td onclick="openChart('${escHtml(tk)}','${escHtml(nm)}')" title="Grafik aç">${escHtml(tk.replace(".IS",""))}</td>${cells}</tr>`;
   }).join("");
   el.innerHTML=`
     <p style="color:var(--muted);font-size:11px;margin-bottom:9px">Son 5 yılın aylık ortalama getirileri. Sembolüne tıklayarak grafik açabilirsiniz.</p>
@@ -1680,7 +1681,18 @@ function switchTab(tab,btn){
 // ═══════════════════════════════════════════════════════
 //  UTILS
 // ═══════════════════════════════════════════════════════
-function esc(s){ return (s||"").replace(/'/g,"&#39;").replace(/"/g,"&quot;"); }
+function escHtml(s){
+  return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function esc(s){ return escHtml(s); }
+function fmtMd(s){
+  let t = escHtml(s);
+  t = t.replace(/\*\*(.+?)\*\*/g,"<b>$1</b>");
+  t = t.replace(/\*(.+?)\*/g,"<i>$1</i>");
+  t = t.replace(/`([^`]+)`/g,"<code style='background:var(--bg);padding:1px 4px;border-radius:3px'>$1</code>");
+  t = t.replace(/\n/g,"<br>");
+  return t;
+}
 document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ closeChart(); }});
 
 // ═══════════════════════════════════════════════════════
@@ -1707,7 +1719,7 @@ function addChatMsg(role, text, ticker){
   wrap.className = `chat-msg ${role}`;
   let inner = "";
   if(role==="ai" && ticker){
-    inner += `<span class="chat-ticker-badge">📊 ${ticker}</span>`;
+    inner += `<span class="chat-ticker-badge">📊 ${escHtml(ticker)}</span>`;
   }
   inner += `<div class="chat-bubble">${text}</div>`;
   inner += `<div class="chat-time">${chatNow()}</div>`;
@@ -1740,7 +1752,7 @@ async function sendChat(){
   chatBusy = true;
   document.getElementById("chat-send").disabled = true;
 
-  addChatMsg("user", msg);
+  addChatMsg("user", escHtml(msg));
   addTyping();
 
   try{
@@ -1752,15 +1764,10 @@ async function sendChat(){
     const d = await r.json();
     removeTyping();
     if(d.error){
-      const wrap = addChatMsg("ai", "⚠️ " + d.error);
+      const wrap = addChatMsg("ai", "⚠️ " + escHtml(d.error));
       wrap.classList.add("error");
     } else {
-      // Markdown-benzeri kalınlaştırma
-      const formatted = d.answer
-        .replace(/\*\*(.*?)\*\*/g,"<b>$1</b>")
-        .replace(/\*(.*?)\*/g,"<i>$1</i>")
-        .replace(/`(.*?)`/g,"<code style='background:var(--bg);padding:1px 4px;border-radius:3px'>$1</code>");
-      addChatMsg("ai", formatted, d.ticker);
+      addChatMsg("ai", fmtMd(d.answer || ""), d.ticker);
     }
   }catch(e){
     removeTyping();
@@ -1778,20 +1785,45 @@ async function sendChat(){
 // ═══════════════════════════════════════════════════════
 let formasyonData = null;
 
-async function fetchFormations(){
+async function pollFormations(){
   const el = document.getElementById("formasyon-content");
-  el.innerHTML = `<div class="loading-wrap"><div class="spinner"></div><div class="loading-txt">BIST100 formasyonları taranıyor (~1-2 dk)...</div></div>`;
-  document.getElementById("cnt-formasyon").textContent = "taranıyor...";
-
   try {
     const r = await fetch("/api/formations");
     const d = await r.json();
-    if(d.error){ el.innerHTML = `<p style="color:var(--red);padding:20px">${d.error}</p>`; return; }
+    if(d.loading){
+      const tot = (d.progress && d.progress.total) || 3;
+      const done = (d.progress && d.progress.done) || 0;
+      el.innerHTML = `<div class="loading-wrap"><div class="spinner"></div><div class="loading-txt">Formasyon taranıyor (${done}/${tot})...</div></div>`;
+      document.getElementById("cnt-formasyon").textContent = "taranıyor...";
+      setTimeout(pollFormations, 2000);
+      return;
+    }
+    if(d.error && !(d.data && d.data.length)){
+      el.innerHTML = `<p style="color:var(--red);padding:20px">${escHtml(d.error)}</p>`;
+      return;
+    }
     formasyonData = d.data;
-    document.getElementById("cnt-formasyon").textContent = d.toplam + " hisse";
-    renderFormations(d.data);
+    document.getElementById("cnt-formasyon").textContent = (d.toplam || 0) + " hisse";
+    renderFormations(d.data || []);
   } catch(e) {
-    el.innerHTML = `<p style="color:var(--red);padding:20px">Hata: ${e.message}</p>`;
+    el.innerHTML = `<p style="color:var(--red);padding:20px">Hata: ${escHtml(e.message)}</p>`;
+  }
+}
+
+async function fetchFormations(){
+  const el = document.getElementById("formasyon-content");
+  el.innerHTML = `<div class="loading-wrap"><div class="spinner"></div><div class="loading-txt">BIST100 formasyon taraması başlatılıyor...</div></div>`;
+  document.getElementById("cnt-formasyon").textContent = "taranıyor...";
+  try {
+    const start = await fetch("/api/formations/refresh", {method:"POST"});
+    const st = await start.json();
+    if(!start.ok && start.status !== 409){
+      el.innerHTML = `<p style="color:var(--red);padding:20px">${escHtml(st.error || "Tarama başlatılamadı")}</p>`;
+      return;
+    }
+    pollFormations();
+  } catch(e) {
+    el.innerHTML = `<p style="color:var(--red);padding:20px">Hata: ${escHtml(e.message)}</p>`;
   }
 }
 
@@ -1811,12 +1843,12 @@ function renderFormations(data){
     for(const f of s.formasyonlar){
       const karCls = f.kar_orani > 3 ? "up" : f.kar_orani > 1 ? "" : "muted";
       html += `<tr>
-        <td class="ticker" onclick="openChart('${s.sembol}.IS','${esc(s.ad)}')">${s.sembol}</td>
-        <td>${s.fiyat||"—"}</td>
+        <td class="ticker" onclick="openChart('${escHtml(s.sembol)}.IS','${escHtml(s.ad)}')">${escHtml(s.sembol)}</td>
+        <td>${fmt(s.fiyat,2)}</td>
         <td class="${(s.degisim||0)>=0?'up':'down'}">${s.degisim||0}%</td>
-        <td>${f.emoji} ${f.tip}</td>
-        <td>${tfLabels[f.zaman_dilimi]||f.zaman_dilimi}</td>
-        <td style="color:var(--green)">${f.hedef} ₺</td>
+        <td>${escHtml(f.emoji)} ${escHtml(f.tip)}</td>
+        <td>${escHtml(tfLabels[f.zaman_dilimi]||f.zaman_dilimi)}</td>
+        <td style="color:var(--green)">${fmt(f.hedef,2)} ₺</td>
         <td class="${karCls}" style="font-weight:700">${f.kar_orani>0?"+":""}${f.kar_orani}%</td>
       </tr>`;
     }
@@ -1850,17 +1882,13 @@ async function fetchDailyReport(){
     removeTyping();
 
     if(d.error){
-      addChatMsg("ai", "⚠️ " + d.error);
+      addChatMsg("ai", "⚠️ " + escHtml(d.error));
     } else {
-      const formatted = d.report
-        .replace(/\*\*(.*?)\*\*/g,"<b>$1</b>")
-        .replace(/\*(.*?)\*/g,"<i>$1</i>")
-        .replace(/`(.*?)`/g,"<code style='background:var(--bg);padding:1px 4px;border-radius:3px'>$1</code>");
-      addChatMsg("ai", `📋 <b>Günlük Favori Raporu</b> (${d.hisse_sayisi} hisse)\n\n${formatted}`);
+      addChatMsg("ai", `📋 <b>Günlük Favori Raporu</b> (${escHtml(d.hisse_sayisi)} hisse)<br><br>${fmtMd(d.report || "")}`);
     }
   } catch(e) {
     removeTyping();
-    addChatMsg("ai", "⚠️ Rapor hatası: " + e.message);
+    addChatMsg("ai", "⚠️ Rapor hatası: " + escHtml(e.message));
   }
 }
 
